@@ -1,0 +1,241 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ══════════════════════════════════════
+   カスタムプロパティ
+══════════════════════════════════════ */
+:root {
+  --font-sans:  "Noto Sans JP", sans-serif;
+  --font-serif: "DM Serif Display", "Noto Serif JP", serif;
+}
+
+/* ══════════════════════════════════════
+   ベーススタイル
+══════════════════════════════════════ */
+@layer base {
+  html {
+    @apply scroll-smooth;
+  }
+  body {
+    @apply bg-bg text-text-1 font-sans font-light antialiased;
+    overflow-x: hidden;
+  }
+  a {
+    @apply text-inherit no-underline;
+  }
+  button {
+    @apply cursor-pointer font-sans;
+  }
+
+  /* スクロールバー */
+  ::-webkit-scrollbar          { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track    { background: transparent; }
+  ::-webkit-scrollbar-thumb    { background: rgba(122,93,199,0.25); border-radius: 2px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(122,93,199,0.45); }
+  * { scrollbar-width: thin; scrollbar-color: rgba(122,93,199,0.25) transparent; }
+}
+
+/* ══════════════════════════════════════
+   コンポーネントレイヤー
+══════════════════════════════════════ */
+@layer components {
+
+  /* ── ナビゲーション ── */
+  .nav-glass {
+    @apply fixed top-0 left-0 right-0 z-50
+           flex items-center justify-between
+           px-7 h-[52px]
+           border-b border-border
+           backdrop-blur-nav;
+    background: var(--bg-nav, rgba(10,9,16,0.92));
+  }
+
+  /* ── カード ── */
+  .card {
+    @apply bg-bg-card border border-border rounded-md
+           transition-all duration-200;
+  }
+  .card-hover {
+    @apply hover:border-accent-lt/20 hover:bg-bg-card2 hover:-translate-y-0.5;
+  }
+
+  /* ── ボタン類 ── */
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2
+           px-5 py-2.5 rounded-full
+           bg-accent-2 text-white text-sm font-normal
+           border-none
+           transition-all duration-200
+           hover:bg-accent hover:-translate-y-px
+           active:scale-95;
+    box-shadow: 0 4px 20px rgba(83,74,183,0.3);
+  }
+  .btn-primary:hover {
+    box-shadow: 0 8px 28px rgba(83,74,183,0.45);
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2
+           px-5 py-2.5 rounded-full
+           bg-transparent text-text-2 text-sm
+           border border-border-2
+           transition-all duration-200
+           hover:border-accent hover:text-accent-lt hover:bg-accent-dim
+           active:scale-95;
+  }
+  .btn-icon {
+    @apply flex items-center justify-center
+           w-9 h-9 rounded-full
+           bg-white/5 border border-border
+           transition-all duration-200
+           hover:bg-accent-dim hover:border-accent-lt/30;
+  }
+
+  /* ── バッジ類 ── */
+  .badge-purple {
+    @apply inline-flex items-center gap-1
+           px-2.5 py-0.5 rounded-full text-[10px]
+           bg-accent/25 border border-accent-lt/30 text-accent-lt;
+  }
+  .badge-teal {
+    @apply inline-flex items-center gap-1
+           px-2.5 py-0.5 rounded-full text-[10px]
+           bg-teal/20 border border-teal/30 text-[#5dcaa5];
+  }
+  .badge-coral {
+    @apply inline-flex items-center gap-1
+           px-2.5 py-0.5 rounded-full text-[10px]
+           bg-coral/15 border border-coral/25 text-[#f0997b];
+  }
+  .badge-gray {
+    @apply inline-flex items-center gap-1
+           px-2.5 py-0.5 rounded-full text-[10px]
+           bg-white/7 border border-white/12 text-text-2;
+  }
+  .badge-amber {
+    @apply inline-flex items-center gap-1
+           px-2.5 py-0.5 rounded-full text-[10px]
+           bg-amber/15 border border-amber/25 text-amber;
+  }
+
+  /* ── フォームコントロール ── */
+  .input-dark {
+    @apply w-full bg-white/5 border border-border-2 rounded-md
+           px-3 py-2 text-sm text-text-1
+           placeholder:text-text-3
+           outline-none caret-accent-lt
+           transition-colors duration-200
+           focus:border-accent-lt/40 focus:bg-accent/10;
+  }
+  .select-dark {
+    @apply w-full bg-bg-card2 border border-border-2 rounded-md
+           px-3 py-2 text-sm text-text-2
+           cursor-pointer appearance-none
+           outline-none
+           focus:border-accent-lt/40;
+  }
+
+  /* ── ページ内タブ ── */
+  .page-tab {
+    @apply flex-1 py-3 text-center text-xs cursor-pointer
+           text-text-3 border-b-2 border-transparent
+           transition-all duration-200;
+  }
+  .page-tab.active {
+    @apply text-accent-lt border-b-accent;
+  }
+
+  /* ── セクションラベル ── */
+  .sec-eyebrow {
+    @apply text-[10px] text-accent tracking-widest uppercase;
+  }
+  .sec-title {
+    @apply font-serif text-[clamp(26px,3.5vw,38px)] font-normal
+           text-text-1 leading-snug;
+  }
+
+  /* ── 名前ハイライト ── */
+  .name-highlight {
+    @apply text-accent-lt;
+  }
+  .name-tag-inline {
+    @apply inline-block bg-accent/[22%] border border-accent-lt/40
+           rounded px-1 text-accent-lt
+           font-sans text-[13px] leading-relaxed;
+  }
+
+  /* ── メディアブロック ── */
+  .media-block {
+    @apply my-4 rounded-lg overflow-hidden
+           border border-border-2 bg-bg-card
+           transition-colors duration-200
+           hover:border-accent-lt/25;
+  }
+
+  /* ── フェードイン（Intersection Observer用） ── */
+  .reveal {
+    opacity: 0;
+    transform: translateY(28px);
+    transition: opacity 0.7s ease, transform 0.7s ease;
+  }
+  .reveal.visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  .reveal-delay-1 { transition-delay: 0.1s; }
+  .reveal-delay-2 { transition-delay: 0.2s; }
+  .reveal-delay-3 { transition-delay: 0.3s; }
+
+  /* ── ボトムシート ── */
+  .bottom-sheet {
+    @apply fixed bottom-0 left-0 right-0
+           bg-bg-card2 rounded-t-xl
+           border border-border-2
+           z-50 animate-slide-up;
+    padding-bottom: env(safe-area-inset-bottom, 16px);
+  }
+  .sheet-handle {
+    @apply w-8 h-0.5 bg-white/20 rounded-full mx-auto mt-2.5;
+  }
+
+  /* ── 進捗バー ── */
+  .progress-bar {
+    @apply h-0.5 bg-white/10 rounded-full overflow-hidden;
+  }
+  .progress-fill {
+    @apply h-full rounded-full bg-gradient-to-r from-accent-2 to-accent
+           transition-[width] duration-500 ease-out;
+  }
+}
+
+/* ══════════════════════════════════════
+   ユーティリティ
+══════════════════════════════════════ */
+@layer utilities {
+  .bg-nav { background: rgba(10,9,16,0.92); }
+  .text-gradient {
+    @apply bg-gradient-to-r from-accent-lt to-accent
+           bg-clip-text text-transparent;
+  }
+  .glass {
+    @apply backdrop-blur-nav border border-border;
+    background: rgba(10,9,16,0.85);
+  }
+  /* 横スクロール非表示 */
+  .scrollbar-none {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .scrollbar-none::-webkit-scrollbar { display: none; }
+
+  /* contenteditable placeholder */
+  [contenteditable]:empty::before {
+    content: attr(data-placeholder);
+    @apply text-text-3 pointer-events-none;
+  }
+}
+
+/* ══════════════════════════════════════
+   Google Fonts 読み込み
+   （layout.tsxの<head>でも読み込み必須）
+══════════════════════════════════════ */
