@@ -1,8 +1,10 @@
 "use client";
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { Toggle, RadioCard } from "@/components/ui";
+import { createClient } from "@/lib/supabase/client";
 import type { ReadingMode } from "@/types";
 
 /* ══════════════════════════════════════
@@ -39,6 +41,14 @@ interface SlotItem {
    メインエディタ
 ══════════════════════════════════════ */
 export default function EditorPage() {
+  return (
+    <Suspense fallback={<div className="h-dvh bg-bg" />}>
+      <EditorInner />
+    </Suspense>
+  );
+}
+
+function EditorInner() {
   const [title, setTitle]         = useState("交差する夜明け");
   const [charCount, setCharCount] = useState(0);
   const [saveState, setSaveState] = useState<"saved" | "saving" | "unsaved">("saved");
@@ -53,16 +63,26 @@ export default function EditorPage() {
   const [previewOpen, setPreviewOpen]       = useState(false);
   const [savedRange, setSavedRange]         = useState<Range | null>(null);
 
+  // URL パラメータ（workId / episodeId）
+  const searchParams = useSearchParams();
+  const workId = searchParams.get("workId") ?? "";
+  const [episodeId, setEpisodeId] = useState(searchParams.get("episodeId") ?? "");
+
   // 挿入済みスロット一覧
   const [slots, setSlots] = useState<SlotItem[]>([]);
+
+  // トースト通知
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
 
   // サイドパネルセクション開閉
   const [secOpen, setSecOpen] = useState({ pub: true, mode: true, chars: true, slots: true });
   const toggleSec = (k: keyof typeof secOpen) =>
     setSecOpen(s => ({ ...s, [k]: !s[k] }));
 
-  const editorRef    = useRef<HTMLDivElement>(null);
+  const editorRef     = useRef<HTMLDivElement>(null);
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout>>();
+  const imgInputRef   = useRef<HTMLInputElement>(null);
+  const vidInputRef   = useRef<HTMLInputElement>(null);
 
   /* 初期コンテンツ */
   useEffect(() => {
@@ -91,6 +111,54 @@ export default function EditorPage() {
     }, 1500);
   }, [title]);
 
+  /* トースト自動消滅 */
+  useEffect(() => {
+    if (!toastMsg) return;
+    const t = setTimeout(() => setToastMsg(null), 3000);
+    return () => clearTimeout(t);
+  }, [toastMsg]);
+
+  /* 下書き保存（Supabase） */
+  const saveDraft = useCallback(async () => {
+    setSaveState("saving");
+    try {
+      const client = createClient();
+      const { data: { user } } = await client.auth.getUser();
+      const bodyJson = { html: editorRef.current?.innerHTML ?? "" };
+
+      if (user) {
+        if (episodeId) {
+          await client.from("episodes")
+            .update({ title, body_json: bodyJson as never, is_published: false })
+            .eq("id", episodeId);
+        } else if (workId) {
+          const { data } = await client.from("episodes")
+            .insert({
+              work_id:      workId,
+              title,
+              body_json:    bodyJson as never,
+              is_published: false,
+              sort_order:   0,
+              char_count:   charCount,
+            })
+            .select("id")
+            .single();
+          if (data?.id) setEpisodeId(data.id as string);
+        }
+      }
+
+      // ローカルにも保存
+      localStorage.setItem("nf_editor_title", title);
+      localStorage.setItem("nf_editor_body", editorRef.current?.innerHTML ?? "");
+
+      setSaveState("saved");
+      setToastMsg("下書きを保存しました");
+    } catch {
+      setSaveState("unsaved");
+      setToastMsg("保存に失敗しました");
+    }
+  }, [title, episodeId, workId, charCount]);
+
   /* キーボードショートカット */
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
@@ -102,11 +170,11 @@ export default function EditorPage() {
       if (k === "z" && !e.shiftKey) { e.preventDefault(); document.execCommand("undo"); }
       if (k === "z" &&  e.shiftKey) { e.preventDefault(); document.execCommand("redo"); }
       if (k === "y")               { e.preventDefault(); document.execCommand("redo"); }
-      if (k === "s") { e.preventDefault(); scheduleAutosave(); }
+      if (k === "s") { e.preventDefault(); void saveDraft(); }
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [scheduleAutosave]);
+  }, [saveDraft]);
 
   /* ── 名前タグ挿入ポップオーバー ── */
   const openTagPopover = () => {
@@ -135,46 +203,56 @@ export default function EditorPage() {
     scheduleAutosave();
   };
 
-  /* ── 画像スロット挿入（即挿入・ダイアログなし） ── */
-  const insertMediaSlot = (type: "image" | "video") => {
+  /* ── ファイル選択してそのまま挿入 ── */
+  const handleFileInsert = useCallback((file: File | undefined, type: "image" | "video") => {
+    if (!file) return;
+
+    // カーソル位置を保存（ファイル選択ダイアログ後にフォーカスが外れるため）
     const sel = window.getSelection();
-    if (sel?.rangeCount) setSavedRange(sel.getRangeAt(0).cloneRange());
+    const range = sel?.rangeCount ? sel.getRangeAt(0).cloneRange() : savedRange;
 
-    const slotId   = `slot_${Date.now()}`;
-    const slotNum  = slots.filter(s => s.type === type).length + 1;
-    const slotName = type === "image" ? `画像${slotNum}` : `動画${slotNum}`;
-    const emoji    = type === "image" ? "🖼️" : "🎬";
-    const badgeCls = type === "image"
-      ? "background:rgba(133,183,235,0.2);color:#85b7eb;"
-      : "background:rgba(240,153,123,0.2);color:#f0997b;";
-    const badge    = type === "image" ? "画像スロット" : "動画スロット";
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const dataUrl = e.target?.result as string;
+      const slotId   = `slot_${Date.now()}`;
+      const slotNum  = slots.filter(s => s.type === type).length + 1;
+      const slotName = type === "image" ? `画像${slotNum}` : `動画${slotNum}`;
+      const badgeCls = type === "image"
+        ? "background:rgba(133,183,235,0.2);color:#85b7eb;"
+        : "background:rgba(240,153,123,0.2);color:#f0997b;";
+      const badge    = type === "image" ? "画像スロット" : "動画スロット";
+      const media    = type === "image"
+        ? `<img src="${dataUrl}" alt="${slotName}" style="width:100%;max-height:380px;object-fit:cover;display:block;" />`
+        : `<video src="${dataUrl}" controls style="width:100%;max-height:360px;display:block;"></video>`;
 
-    const html = `
+      const html = `
 <div class="media-slot-block" contenteditable="false" data-slot-id="${slotId}" data-slot-type="${type}" data-slot-name="${slotName}"
-  style="margin:20px 0;border-radius:12px;border:1.5px dashed rgba(133,183,235,0.35);overflow:hidden;background:rgba(133,183,235,0.04);">
-  <div style="padding:18px 16px 14px;display:flex;align-items:center;gap:12px;">
-    <div style="width:56px;height:56px;border-radius:10px;background:rgba(133,183,235,0.12);border:1px solid rgba(133,183,235,0.2);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0;">${emoji}</div>
-    <div style="flex:1;min-width:0;">
-      <p data-slot-name-display style="font-size:15px;font-weight:600;color:#d4e8ff;margin:0 0 3px;">${slotName}</p>
-      <p style="font-size:10px;color:rgba(255,255,255,0.35);margin:0;">右パネルでスロット名を変更できます</p>
-    </div>
-    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:5px;">
+  style="margin:20px 0;border-radius:12px;border:1.5px solid rgba(133,183,235,0.3);overflow:hidden;background:rgba(133,183,235,0.04);">
+  ${media}
+  <div style="padding:8px 12px;display:flex;align-items:center;justify-content:space-between;background:rgba(133,183,235,0.05);">
+    <p data-slot-name-display style="font-size:12px;color:#85b7eb;margin:0;font-weight:500;">${slotName}</p>
+    <div style="display:flex;align-items:center;gap:8px;">
       <span style="font-size:9px;padding:2px 8px;border-radius:8px;${badgeCls}">${badge}</span>
       <button onclick="this.closest('.media-slot-block').remove()" style="font-size:10px;color:rgba(240,153,123,0.6);padding:2px 7px;border-radius:4px;background:rgba(255,255,255,0.04);border:0.5px solid rgba(255,255,255,0.07);">削除</button>
     </div>
   </div>
 </div>`;
 
-    if (editorRef.current) {
-      editorRef.current.focus();
-      const curSel = window.getSelection();
-      if (savedRange) { curSel?.removeAllRanges(); curSel?.addRange(savedRange); }
-      document.execCommand("insertHTML", false, html);
-    }
-    setSlots(prev => [...prev, { id: slotId, type, name: slotName }]);
-    updateCount();
-    scheduleAutosave();
-  };
+      if (editorRef.current) {
+        editorRef.current.focus();
+        const curSel = window.getSelection();
+        if (range) { curSel?.removeAllRanges(); curSel?.addRange(range); }
+        document.execCommand("insertHTML", false, html);
+      }
+      setSlots(prev => [...prev, { id: slotId, type, name: slotName }]);
+      updateCount();
+      scheduleAutosave();
+    };
+    reader.readAsDataURL(file);
+    // 同じファイルを再選択できるようリセット
+    if (type === "image" && imgInputRef.current) imgInputRef.current.value = "";
+    if (type === "video" && vidInputRef.current) vidInputRef.current.value = "";
+  }, [slots, savedRange, updateCount, scheduleAutosave]);
 
   /* ── サイドパネルからスロット名を更新 ── */
   const updateSlotName = (slotId: string, name: string) => {
@@ -254,7 +332,7 @@ export default function EditorPage() {
         <div className="text-[11px] text-text-3 px-3 border-x border-border flex-shrink-0">
           {charCount.toLocaleString()}字
         </div>
-        <button onClick={scheduleAutosave}
+        <button onClick={() => void saveDraft()}
           className="text-[11px] px-3 py-1.5 rounded-2xl border border-border-2 text-text-2 hover:border-accent hover:text-accent-lt transition-all flex-shrink-0">
           下書き保存
         </button>
@@ -272,9 +350,9 @@ export default function EditorPage() {
         <div className="flex-1 flex flex-col min-w-0">
 
           {/* ツールバー */}
-          <div className="flex items-center gap-1 px-3 py-1.5 bg-[#111019] border-b border-border flex-wrap flex-shrink-0">
+          <div className="flex items-center gap-1 px-3 py-1.5 bg-[#111019] border-b border-border flex-shrink-0">
 
-            {/* 元に戻す / やり直し */}
+            {/* ↩ 戻る / ↪ やり直し */}
             <ToolGroup>
               <TbBtn title="元に戻す (Ctrl+Z)" onClick={() => document.execCommand("undo")}>
                 <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8">
@@ -288,60 +366,27 @@ export default function EditorPage() {
               </TbBtn>
             </ToolGroup>
 
-            {/* テキスト装飾 */}
+            {/* 画像挿入 / 動画挿入 / ページめくり */}
             <ToolGroup>
-              <TbBtn title="太字 (Ctrl+B)" onClick={() => document.execCommand("bold")}>
-                <svg width="11" height="11" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3 2h5a3 3 0 010 6H3V2zM3 8h6a3 3 0 010 6H3V8z"/></svg>
-              </TbBtn>
-              <TbBtn title="イタリック (Ctrl+I)" onClick={() => document.execCommand("italic")}>
-                <svg width="11" height="11" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2"><line x1="8" y1="2" x2="6" y2="12"/><line x1="5" y1="2" x2="11" y2="2"/><line x1="3" y1="12" x2="9" y2="12"/></svg>
-              </TbBtn>
-              <TbBtn title="下線 (Ctrl+U)" onClick={() => document.execCommand("underline")}>
-                <svg width="11" height="11" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 2v5a4 4 0 008 0V2"/><line x1="2" y1="13" x2="12" y2="13"/></svg>
-              </TbBtn>
-            </ToolGroup>
-
-            {/* 見出し・区切り */}
-            <ToolGroup>
-              <TbBtnWide title="大見出し" onClick={() => document.execCommand("formatBlock", false, "h2")}>H1</TbBtnWide>
-              <TbBtnWide title="小見出し" onClick={() => document.execCommand("formatBlock", false, "h3")}>H2</TbBtnWide>
-              <TbBtn title="水平線" onClick={() => document.execCommand("insertHTML", false, '<hr style="border:none;border-top:0.5px solid rgba(255,255,255,0.15);margin:20px 0;">')}>
-                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8"><line x1="2" y1="8" x2="14" y2="8"/></svg>
-              </TbBtn>
-            </ToolGroup>
-
-            {/* 名前タグ */}
-            <ToolGroup>
-              <button id="tagInsertBtn" onClick={openTagPopover}
-                className="flex items-center gap-1.5 px-2.5 h-7 rounded-md text-[10.5px] text-accent-lt bg-accent/15 border border-accent-lt/25 hover:bg-accent/25 transition-colors">
-                <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6"><circle cx="6" cy="4" r="2.5"/><path d="M2 10c0-2.2 1.8-4 4-4s4 1.8 4 4"/></svg>
-                名前タグ
-              </button>
-            </ToolGroup>
-
-            {/* メディアスロット */}
-            <ToolGroup>
-              <button onClick={() => insertMediaSlot("image")}
+              <button
+                onClick={() => { const sel = window.getSelection(); if (sel?.rangeCount) setSavedRange(sel.getRangeAt(0).cloneRange()); imgInputRef.current?.click(); }}
                 className="flex items-center gap-1 px-2.5 h-7 rounded-md text-[10.5px] text-[#85b7eb] bg-blue/12 border border-blue/25 hover:bg-blue/20 transition-colors">
                 <svg width="10" height="10" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6"><rect x="1" y="2" width="12" height="10" rx="1.5"/><path d="M1 9l3-3 3 3 2-2 4 3"/></svg>
-                画像スロット
+                画像挿入
               </button>
-              <button onClick={() => insertMediaSlot("video")}
+              <button
+                onClick={() => { const sel = window.getSelection(); if (sel?.rangeCount) setSavedRange(sel.getRangeAt(0).cloneRange()); vidInputRef.current?.click(); }}
                 className="flex items-center gap-1 px-2.5 h-7 rounded-md text-[10.5px] text-[#f0997b] bg-coral/12 border border-coral/25 hover:bg-coral/20 transition-colors">
                 <svg width="10" height="10" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6"><rect x="1" y="2" width="10" height="10" rx="1.5"/><path d="M11 6l3-2v6l-3-2"/></svg>
-                動画スロット
+                動画挿入
               </button>
-            </ToolGroup>
-
-            {/* ページめくり */}
-            <ToolGroup>
               <button onClick={insertPageBreak}
                 className="flex items-center gap-1.5 px-2.5 h-7 rounded-md text-[10.5px] text-[#c5b3ff] bg-accent/12 border border-accent-lt/25 hover:bg-accent/22 transition-colors">
                 <svg width="10" height="10" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6">
                   <rect x="1" y="1" width="5.5" height="12" rx="1"/>
                   <rect x="7.5" y="1" width="5.5" height="12" rx="1"/>
                 </svg>
-                ページめくり
+                📄 ページめくり
               </button>
             </ToolGroup>
 
@@ -512,6 +557,34 @@ export default function EditorPage() {
           chars={chars}
           onClose={() => setPreviewOpen(false)}
         />
+      )}
+
+      {/* ── 隠しファイル入力 ── */}
+      <input
+        ref={imgInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={e => handleFileInsert(e.target.files?.[0], "image")}
+      />
+      <input
+        ref={vidInputRef}
+        type="file"
+        accept="video/*"
+        className="hidden"
+        onChange={e => handleFileInsert(e.target.files?.[0], "video")}
+      />
+
+      {/* ── トースト通知 ── */}
+      {toastMsg && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 pointer-events-none">
+          <div className="flex items-center gap-2.5 px-4 py-2.5 bg-[#1a1927] border border-teal/30 rounded-xl shadow-2xl text-[12.5px] text-teal whitespace-nowrap animate-pop-in">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M3 8a5 5 0 1010 0A5 5 0 003 8z"/><path d="M6 8l1.5 1.5L10 6"/>
+            </svg>
+            {toastMsg}
+          </div>
+        </div>
       )}
     </div>
   );

@@ -1,16 +1,11 @@
 "use client";
 import Link from "next/link";
-import { useRef } from "react";
-import { NovelCard, RankCard } from "@/components/works/WorkCard";
-import { MOCK_WORKS } from "@/lib/mock-data";
 import { cn } from "@/lib/utils";
 
 /* ══════════════════════════════════════
    PickupSection
 ══════════════════════════════════════ */
 export function PickupSection() {
-  const trackRef = useRef<HTMLDivElement>(null);
-
   return (
     <section className="py-14">
       <div className="flex items-end justify-between px-8 max-w-[1100px] mx-auto mb-6">
@@ -22,15 +17,8 @@ export function PickupSection() {
           すべて見る <span>→</span>
         </Link>
       </div>
-
-      <div
-        ref={trackRef}
-        className="flex gap-4 px-8 overflow-x-auto scrollbar-none"
-        style={{ scrollSnapType: "x mandatory" }}
-      >
-        {MOCK_WORKS.concat(MOCK_WORKS).map((w, i) => (
-          <NovelCard key={`${w.id}-${i}`} work={w} />
-        ))}
+      <div className="flex items-center justify-center py-10 text-[13px] text-text-3 px-8">
+        まだ作品がありません
       </div>
     </section>
   );
@@ -40,11 +28,8 @@ export function PickupSection() {
    RankingSection
 ══════════════════════════════════════ */
 const RANK_PERIODS = ["週間", "日間", "月間", "累計"] as const;
-type Period = (typeof RANK_PERIODS)[number];
 
 export function RankingSection() {
-  const sorted = [...MOCK_WORKS].sort((a, b) => b.likeCount - a.likeCount);
-
   return (
     <section className="py-14 max-w-[1100px] mx-auto px-8">
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-8 items-start">
@@ -70,10 +55,8 @@ export function RankingSection() {
               ))}
             </div>
           </div>
-          <div className="flex flex-col gap-2">
-            {sorted.map((w, i) => (
-              <RankCard key={w.id} work={w} rank={i + 1} />
-            ))}
+          <div className="flex items-center justify-center py-10 text-[13px] text-text-3">
+            まだ作品がありません
           </div>
         </div>
 
