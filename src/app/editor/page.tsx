@@ -29,6 +29,12 @@ const CHAR_COLORS = [
   "rgba(250,199,117,0.2)",
 ];
 
+interface SlotItem {
+  id:   string;
+  type: "image" | "video";
+  name: string;
+}
+
 /* ══════════════════════════════════════
    メインエディタ
 ══════════════════════════════════════ */
@@ -47,13 +53,11 @@ export default function EditorPage() {
   const [previewOpen, setPreviewOpen]       = useState(false);
   const [savedRange, setSavedRange]         = useState<Range | null>(null);
 
-  // 画像スロット名ダイアログ
-  const [slotDialogOpen, setSlotDialogOpen]   = useState(false);
-  const [slotDialogType, setSlotDialogType]   = useState<"image" | "video">("image");
-  const [slotDialogName, setSlotDialogName]   = useState("");
+  // 挿入済みスロット一覧
+  const [slots, setSlots] = useState<SlotItem[]>([]);
 
   // サイドパネルセクション開閉
-  const [secOpen, setSecOpen] = useState({ pub: true, mode: true, chars: true });
+  const [secOpen, setSecOpen] = useState({ pub: true, mode: true, chars: true, slots: true });
   const toggleSec = (k: keyof typeof secOpen) =>
     setSecOpen(s => ({ ...s, [k]: !s[k] }));
 
@@ -131,24 +135,19 @@ export default function EditorPage() {
     scheduleAutosave();
   };
 
-  /* ── 画像スロット挿入（ダイアログ経由） ── */
-  const openSlotDialog = (type: "image" | "video") => {
-    // カーソル位置を保存
+  /* ── 画像スロット挿入（即挿入・ダイアログなし） ── */
+  const insertMediaSlot = (type: "image" | "video") => {
     const sel = window.getSelection();
     if (sel?.rangeCount) setSavedRange(sel.getRangeAt(0).cloneRange());
-    setSlotDialogType(type);
-    setSlotDialogName("");
-    setSlotDialogOpen(true);
-  };
 
-  const insertMediaSlot = (slotName: string) => {
-    const type    = slotDialogType;
-    const emoji   = type === "image" ? "🖼️" : "🎬";
+    const slotId   = `slot_${Date.now()}`;
+    const slotNum  = slots.filter(s => s.type === type).length + 1;
+    const slotName = type === "image" ? `画像${slotNum}` : `動画${slotNum}`;
+    const emoji    = type === "image" ? "🖼️" : "🎬";
     const badgeCls = type === "image"
       ? "background:rgba(133,183,235,0.2);color:#85b7eb;"
       : "background:rgba(240,153,123,0.2);color:#f0997b;";
     const badge    = type === "image" ? "画像スロット" : "動画スロット";
-    const slotId   = `slot_${Date.now()}`;
 
     const html = `
 <div class="media-slot-block" contenteditable="false" data-slot-id="${slotId}" data-slot-type="${type}" data-slot-name="${slotName}"
@@ -156,8 +155,8 @@ export default function EditorPage() {
   <div style="padding:18px 16px 14px;display:flex;align-items:center;gap:12px;">
     <div style="width:56px;height:56px;border-radius:10px;background:rgba(133,183,235,0.12);border:1px solid rgba(133,183,235,0.2);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0;">${emoji}</div>
     <div style="flex:1;min-width:0;">
-      <p style="font-size:15px;font-weight:600;color:#d4e8ff;margin:0 0 3px;">${slotName || "(名前未設定)"}</p>
-      <p style="font-size:10px;color:rgba(255,255,255,0.35);margin:0;">未設定 — 後からファイルをアップロードできます</p>
+      <p data-slot-name-display style="font-size:15px;font-weight:600;color:#d4e8ff;margin:0 0 3px;">${slotName}</p>
+      <p style="font-size:10px;color:rgba(255,255,255,0.35);margin:0;">右パネルでスロット名を変更できます</p>
     </div>
     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:5px;">
       <span style="font-size:9px;padding:2px 8px;border-radius:8px;${badgeCls}">${badge}</span>
@@ -168,26 +167,49 @@ export default function EditorPage() {
 
     if (editorRef.current) {
       editorRef.current.focus();
-      if (savedRange) {
-        const sel = window.getSelection();
-        sel?.removeAllRanges();
-        sel?.addRange(savedRange);
-      }
+      const curSel = window.getSelection();
+      if (savedRange) { curSel?.removeAllRanges(); curSel?.addRange(savedRange); }
       document.execCommand("insertHTML", false, html);
     }
-    setSlotDialogOpen(false);
+    setSlots(prev => [...prev, { id: slotId, type, name: slotName }]);
     updateCount();
     scheduleAutosave();
   };
 
-  /* ── ページ切り替えブロック挿入 ── */
+  /* ── サイドパネルからスロット名を更新 ── */
+  const updateSlotName = (slotId: string, name: string) => {
+    setSlots(prev => prev.map(s => s.id === slotId ? { ...s, name } : s));
+    if (editorRef.current) {
+      const el = editorRef.current.querySelector(`[data-slot-id="${slotId}"]`);
+      if (el) {
+        el.setAttribute("data-slot-name", name);
+        const nameEl = el.querySelector("[data-slot-name-display]");
+        if (nameEl) nameEl.textContent = name || "(名前未設定)";
+      }
+    }
+  };
+
+  /* ── エディタのスロットとstateを同期（削除検知） ── */
+  const syncSlots = useCallback(() => {
+    if (!editorRef.current) return;
+    const existing = new Set(
+      Array.from(editorRef.current.querySelectorAll("[data-slot-id]"))
+        .map(el => el.getAttribute("data-slot-id")!)
+    );
+    setSlots(prev => prev.filter(s => existing.has(s.id)));
+  }, []);
+
+  /* ── ページめくりブロック挿入 ── */
   const insertPageBreak = () => {
     const html = `
 <div class="page-break-block" contenteditable="false"
-  style="margin:24px 0;display:flex;align-items:center;gap:10px;user-select:none;">
-  <div style="flex:1;height:1px;background:linear-gradient(to right,transparent,rgba(122,93,199,0.5));"></div>
-  <span style="font-size:10px;color:rgba(122,93,199,0.8);letter-spacing:0.15em;padding:4px 12px;border-radius:20px;border:1px solid rgba(122,93,199,0.3);background:rgba(122,93,199,0.08);white-space:nowrap;">― ページ切り替え ―</span>
-  <div style="flex:1;height:1px;background:linear-gradient(to left,transparent,rgba(122,93,199,0.5));"></div>
+  style="margin:28px 0;border-radius:10px;background:linear-gradient(135deg,rgba(122,93,199,0.18),rgba(83,74,183,0.12));border:1.5px solid rgba(122,93,199,0.4);padding:14px 20px;display:flex;align-items:center;gap:14px;user-select:none;cursor:default;">
+  <span style="font-size:22px;flex-shrink:0;">📖</span>
+  <div style="flex:1;">
+    <p style="font-size:14px;font-weight:700;color:rgba(197,179,255,0.95);margin:0 0 3px;letter-spacing:0.04em;">ページめくり</p>
+    <p style="font-size:10px;color:rgba(197,179,255,0.5);margin:0;">ここで読者のページが切り替わります</p>
+  </div>
+  <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="rgba(197,179,255,0.5)" stroke-width="1.8" style="flex-shrink:0;"><path d="M6 3l5 5-5 5"/></svg>
 </div>`;
     editorRef.current?.focus();
     document.execCommand("insertHTML", false, html);
@@ -299,19 +321,19 @@ export default function EditorPage() {
 
             {/* メディアスロット */}
             <ToolGroup>
-              <button onClick={() => openSlotDialog("image")}
+              <button onClick={() => insertMediaSlot("image")}
                 className="flex items-center gap-1 px-2.5 h-7 rounded-md text-[10.5px] text-[#85b7eb] bg-blue/12 border border-blue/25 hover:bg-blue/20 transition-colors">
                 <svg width="10" height="10" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6"><rect x="1" y="2" width="12" height="10" rx="1.5"/><path d="M1 9l3-3 3 3 2-2 4 3"/></svg>
                 画像スロット
               </button>
-              <button onClick={() => openSlotDialog("video")}
+              <button onClick={() => insertMediaSlot("video")}
                 className="flex items-center gap-1 px-2.5 h-7 rounded-md text-[10.5px] text-[#f0997b] bg-coral/12 border border-coral/25 hover:bg-coral/20 transition-colors">
                 <svg width="10" height="10" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6"><rect x="1" y="2" width="10" height="10" rx="1.5"/><path d="M11 6l3-2v6l-3-2"/></svg>
                 動画スロット
               </button>
             </ToolGroup>
 
-            {/* ページ切り替え */}
+            {/* ページめくり */}
             <ToolGroup>
               <button onClick={insertPageBreak}
                 className="flex items-center gap-1.5 px-2.5 h-7 rounded-md text-[10.5px] text-[#c5b3ff] bg-accent/12 border border-accent-lt/25 hover:bg-accent/22 transition-colors">
@@ -319,7 +341,7 @@ export default function EditorPage() {
                   <rect x="1" y="1" width="5.5" height="12" rx="1"/>
                   <rect x="7.5" y="1" width="5.5" height="12" rx="1"/>
                 </svg>
-                ページ切り替え
+                ページめくり
               </button>
             </ToolGroup>
 
@@ -348,7 +370,7 @@ export default function EditorPage() {
                 contentEditable
                 suppressContentEditableWarning
                 data-placeholder="ここに本文を書いてください…"
-                onInput={() => { updateCount(); setSaveState("unsaved"); scheduleAutosave(); }}
+                onInput={() => { updateCount(); setSaveState("unsaved"); scheduleAutosave(); syncSlots(); }}
                 onKeyDown={e => {
                   if (e.key === "Enter") {
                     e.preventDefault();
@@ -408,6 +430,36 @@ export default function EditorPage() {
             </div>
           </SideSection>
 
+          <SideSection title="スロット管理" open={secOpen.slots} onToggle={() => toggleSec("slots")}>
+            {slots.length === 0 ? (
+              <p className="text-[10px] text-text-3 text-center py-2 leading-relaxed">
+                スロットが挿入されていません
+              </p>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {slots.map(slot => (
+                  <div key={slot.id} className="flex flex-col gap-1.5 p-2 bg-bg-card2 rounded-lg border border-border">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[13px]">{slot.type === "image" ? "🖼️" : "🎬"}</span>
+                      <span className="text-[9px] px-1.5 py-0.5 rounded-md font-medium"
+                        style={slot.type === "image"
+                          ? { background: "rgba(133,183,235,0.15)", color: "#85b7eb" }
+                          : { background: "rgba(240,153,123,0.15)", color: "#f0997b" }}>
+                        {slot.type === "image" ? "画像" : "動画"}
+                      </span>
+                    </div>
+                    <input
+                      value={slot.name}
+                      onChange={e => updateSlotName(slot.id, e.target.value)}
+                      placeholder="スロット名を入力"
+                      className="input-dark text-[10.5px] w-full"
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+          </SideSection>
+
           <Link href="/works/work-001"
             className="flex items-center justify-between px-3.5 py-3 text-[11px] text-text-2 hover:bg-white/3 transition-colors border-t border-border">
             <span>作品情報・章管理</span>
@@ -441,16 +493,6 @@ export default function EditorPage() {
             </button>
           </div>
         </>
-      )}
-
-      {/* ── 画像スロット名ダイアログ ── */}
-      {slotDialogOpen && (
-        <SlotNameDialog
-          type={slotDialogType}
-          defaultName={slotDialogName}
-          onConfirm={insertMediaSlot}
-          onClose={() => setSlotDialogOpen(false)}
-        />
       )}
 
       {/* ── キャラクター追加・編集モーダル ── */}
@@ -519,75 +561,6 @@ function SideRow({ label, children }: { label: string; children: React.ReactNode
     <div className="flex items-center justify-between">
       <span className="text-[11px] text-text-2">{label}</span>
       {children}
-    </div>
-  );
-}
-
-/* ── 画像スロット名入力ダイアログ ── */
-function SlotNameDialog({ type, defaultName, onConfirm, onClose }: {
-  type: "image" | "video";
-  defaultName: string;
-  onConfirm: (name: string) => void;
-  onClose: () => void;
-}) {
-  const [name, setName] = useState(defaultName);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    inputRef.current?.focus();
-    inputRef.current?.select();
-  }, []);
-
-  const label = type === "image" ? "画像" : "動画";
-  const examples = type === "image"
-    ? ["有村架純①", "風景①", "桜の木", "教室の朝"]
-    : ["OP動画", "挿入歌シーン"];
-
-  return (
-    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center px-4"
-      onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="w-full max-w-[380px] bg-bg-card2 border border-border-2 rounded-xl animate-pop-in">
-        <div className="flex items-center justify-between px-4 py-4 border-b border-border">
-          <p className="text-[13px] font-medium text-text-1">
-            {label}スロットを追加
-          </p>
-          <button onClick={onClose} className="w-6 h-6 rounded-full bg-white/5 border border-border flex items-center justify-center">
-            <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth="2"><path d="M3 3l10 10M13 3L3 13"/></svg>
-          </button>
-        </div>
-        <div className="px-4 py-4">
-          <p className="text-[10.5px] text-text-2 mb-1.5">スロット名 <span className="text-text-3">（読者には表示されません）</span></p>
-          <input
-            ref={inputRef}
-            value={name}
-            onChange={e => setName(e.target.value)}
-            onKeyDown={e => { if (e.key === "Enter") onConfirm(name); if (e.key === "Escape") onClose(); }}
-            placeholder="例：有村架純①"
-            className="input-dark w-full"
-          />
-          <div className="flex flex-wrap gap-1.5 mt-3">
-            {examples.map(ex => (
-              <button key={ex} onClick={() => setName(ex)}
-                className="text-[10px] px-2.5 py-1 rounded-lg bg-white/5 border border-border-2 text-text-2 hover:bg-accent/15 hover:text-accent-lt hover:border-accent-lt/30 transition-colors">
-                {ex}
-              </button>
-            ))}
-          </div>
-          <p className="text-[10px] text-text-3 mt-3 leading-relaxed">
-            スロットは「名前」で管理されます。後からメディアパックでファイルを割り当てられます。
-          </p>
-        </div>
-        <div className="flex gap-2 justify-end px-4 pb-4">
-          <button onClick={onClose}
-            className="text-[12px] px-4 py-2 rounded-xl border border-border-2 text-text-2 hover:text-text-1 transition-colors">
-            キャンセル
-          </button>
-          <button onClick={() => onConfirm(name.trim() || `${label}スロット`)}
-            className="text-[12px] px-4 py-2 rounded-xl bg-accent-2 text-white hover:bg-accent transition-colors">
-            挿入する
-          </button>
-        </div>
-      </div>
     </div>
   );
 }
