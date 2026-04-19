@@ -31,12 +31,6 @@ const CHAR_COLORS = [
   "rgba(250,199,117,0.2)",
 ];
 
-interface SlotItem {
-  id:   string;
-  type: "image" | "video";
-  name: string;
-}
-
 /* ══════════════════════════════════════
    メインエディタ
 ══════════════════════════════════════ */
@@ -68,14 +62,11 @@ function EditorInner() {
   const workId = searchParams.get("workId") ?? "";
   const [episodeId, setEpisodeId] = useState(searchParams.get("episodeId") ?? "");
 
-  // 挿入済みスロット一覧
-  const [slots, setSlots] = useState<SlotItem[]>([]);
-
   // トースト通知
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
   // サイドパネルセクション開閉
-  const [secOpen, setSecOpen] = useState({ pub: true, mode: true, chars: true, slots: true });
+  const [secOpen, setSecOpen] = useState({ pub: true, mode: true, chars: true });
   const toggleSec = (k: keyof typeof secOpen) =>
     setSecOpen(s => ({ ...s, [k]: !s[k] }));
 
@@ -203,79 +194,28 @@ function EditorInner() {
     scheduleAutosave();
   };
 
-  /* ── ファイル選択してそのまま挿入 ── */
-  const handleFileInsert = useCallback((file: File | undefined, type: "image" | "video") => {
+  /* ── ファイル選択 → img/video をそのまま挿入（シンプル） ── */
+  const handleMediaInsert = useCallback((file: File | undefined, type: "image" | "video") => {
     if (!file) return;
-
-    // カーソル位置を保存（ファイル選択ダイアログ後にフォーカスが外れるため）
-    const sel = window.getSelection();
-    const range = sel?.rangeCount ? sel.getRangeAt(0).cloneRange() : savedRange;
-
     const reader = new FileReader();
     reader.onload = (e) => {
-      const dataUrl = e.target?.result as string;
-      const slotId   = `slot_${Date.now()}`;
-      const slotNum  = slots.filter(s => s.type === type).length + 1;
-      const slotName = type === "image" ? `画像${slotNum}` : `動画${slotNum}`;
-      const badgeCls = type === "image"
-        ? "background:rgba(133,183,235,0.2);color:#85b7eb;"
-        : "background:rgba(240,153,123,0.2);color:#f0997b;";
-      const badge    = type === "image" ? "画像スロット" : "動画スロット";
-      const media    = type === "image"
-        ? `<img src="${dataUrl}" alt="${slotName}" style="width:100%;max-height:380px;object-fit:cover;display:block;" />`
-        : `<video src="${dataUrl}" controls style="width:100%;max-height:360px;display:block;"></video>`;
-
-      const html = `
-<div class="media-slot-block" contenteditable="false" data-slot-id="${slotId}" data-slot-type="${type}" data-slot-name="${slotName}"
-  style="margin:20px 0;border-radius:12px;border:1.5px solid rgba(133,183,235,0.3);overflow:hidden;background:rgba(133,183,235,0.04);">
-  ${media}
-  <div style="padding:8px 12px;display:flex;align-items:center;justify-content:space-between;background:rgba(133,183,235,0.05);">
-    <p data-slot-name-display style="font-size:12px;color:#85b7eb;margin:0;font-weight:500;">${slotName}</p>
-    <div style="display:flex;align-items:center;gap:8px;">
-      <span style="font-size:9px;padding:2px 8px;border-radius:8px;${badgeCls}">${badge}</span>
-      <button onclick="this.closest('.media-slot-block').remove()" style="font-size:10px;color:rgba(240,153,123,0.6);padding:2px 7px;border-radius:4px;background:rgba(255,255,255,0.04);border:0.5px solid rgba(255,255,255,0.07);">削除</button>
-    </div>
-  </div>
-</div>`;
-
+      const src = e.target?.result as string;
+      const html = type === "image"
+        ? `<img src="${src}" alt="" style="max-width:100%;border-radius:8px;margin:8px 0;display:block;" />`
+        : `<video src="${src}" controls style="max-width:100%;border-radius:8px;margin:8px 0;display:block;"></video>`;
       if (editorRef.current) {
         editorRef.current.focus();
-        const curSel = window.getSelection();
-        if (range) { curSel?.removeAllRanges(); curSel?.addRange(range); }
+        const sel = window.getSelection();
+        if (savedRange) { sel?.removeAllRanges(); sel?.addRange(savedRange); }
         document.execCommand("insertHTML", false, html);
       }
-      setSlots(prev => [...prev, { id: slotId, type, name: slotName }]);
       updateCount();
       scheduleAutosave();
     };
     reader.readAsDataURL(file);
-    // 同じファイルを再選択できるようリセット
     if (type === "image" && imgInputRef.current) imgInputRef.current.value = "";
     if (type === "video" && vidInputRef.current) vidInputRef.current.value = "";
-  }, [slots, savedRange, updateCount, scheduleAutosave]);
-
-  /* ── サイドパネルからスロット名を更新 ── */
-  const updateSlotName = (slotId: string, name: string) => {
-    setSlots(prev => prev.map(s => s.id === slotId ? { ...s, name } : s));
-    if (editorRef.current) {
-      const el = editorRef.current.querySelector(`[data-slot-id="${slotId}"]`);
-      if (el) {
-        el.setAttribute("data-slot-name", name);
-        const nameEl = el.querySelector("[data-slot-name-display]");
-        if (nameEl) nameEl.textContent = name || "(名前未設定)";
-      }
-    }
-  };
-
-  /* ── エディタのスロットとstateを同期（削除検知） ── */
-  const syncSlots = useCallback(() => {
-    if (!editorRef.current) return;
-    const existing = new Set(
-      Array.from(editorRef.current.querySelectorAll("[data-slot-id]"))
-        .map(el => el.getAttribute("data-slot-id")!)
-    );
-    setSlots(prev => prev.filter(s => existing.has(s.id)));
-  }, []);
+  }, [savedRange, updateCount, scheduleAutosave]);
 
   /* ── ページめくりブロック挿入 ── */
   const insertPageBreak = () => {
@@ -369,13 +309,13 @@ function EditorInner() {
             {/* 画像挿入 / 動画挿入 / ページめくり */}
             <ToolGroup>
               <button
-                onClick={() => { const sel = window.getSelection(); if (sel?.rangeCount) setSavedRange(sel.getRangeAt(0).cloneRange()); imgInputRef.current?.click(); }}
+                onClick={() => { const s = window.getSelection(); if (s?.rangeCount) setSavedRange(s.getRangeAt(0).cloneRange()); imgInputRef.current?.click(); }}
                 className="flex items-center gap-1 px-2.5 h-7 rounded-md text-[10.5px] text-[#85b7eb] bg-blue/12 border border-blue/25 hover:bg-blue/20 transition-colors">
                 <svg width="10" height="10" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6"><rect x="1" y="2" width="12" height="10" rx="1.5"/><path d="M1 9l3-3 3 3 2-2 4 3"/></svg>
                 画像挿入
               </button>
               <button
-                onClick={() => { const sel = window.getSelection(); if (sel?.rangeCount) setSavedRange(sel.getRangeAt(0).cloneRange()); vidInputRef.current?.click(); }}
+                onClick={() => { const s = window.getSelection(); if (s?.rangeCount) setSavedRange(s.getRangeAt(0).cloneRange()); vidInputRef.current?.click(); }}
                 className="flex items-center gap-1 px-2.5 h-7 rounded-md text-[10.5px] text-[#f0997b] bg-coral/12 border border-coral/25 hover:bg-coral/20 transition-colors">
                 <svg width="10" height="10" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6"><rect x="1" y="2" width="10" height="10" rx="1.5"/><path d="M11 6l3-2v6l-3-2"/></svg>
                 動画挿入
@@ -415,7 +355,7 @@ function EditorInner() {
                 contentEditable
                 suppressContentEditableWarning
                 data-placeholder="ここに本文を書いてください…"
-                onInput={() => { updateCount(); setSaveState("unsaved"); scheduleAutosave(); syncSlots(); }}
+                onInput={() => { updateCount(); setSaveState("unsaved"); scheduleAutosave(); }}
                 onKeyDown={e => {
                   if (e.key === "Enter") {
                     e.preventDefault();
@@ -473,36 +413,6 @@ function EditorInner() {
                 ＋ キャラクターを追加
               </button>
             </div>
-          </SideSection>
-
-          <SideSection title="スロット管理" open={secOpen.slots} onToggle={() => toggleSec("slots")}>
-            {slots.length === 0 ? (
-              <p className="text-[10px] text-text-3 text-center py-2 leading-relaxed">
-                スロットが挿入されていません
-              </p>
-            ) : (
-              <div className="flex flex-col gap-2">
-                {slots.map(slot => (
-                  <div key={slot.id} className="flex flex-col gap-1.5 p-2 bg-bg-card2 rounded-lg border border-border">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[13px]">{slot.type === "image" ? "🖼️" : "🎬"}</span>
-                      <span className="text-[9px] px-1.5 py-0.5 rounded-md font-medium"
-                        style={slot.type === "image"
-                          ? { background: "rgba(133,183,235,0.15)", color: "#85b7eb" }
-                          : { background: "rgba(240,153,123,0.15)", color: "#f0997b" }}>
-                        {slot.type === "image" ? "画像" : "動画"}
-                      </span>
-                    </div>
-                    <input
-                      value={slot.name}
-                      onChange={e => updateSlotName(slot.id, e.target.value)}
-                      placeholder="スロット名を入力"
-                      className="input-dark text-[10.5px] w-full"
-                    />
-                  </div>
-                ))}
-              </div>
-            )}
           </SideSection>
 
           <Link href="/works/work-001"
@@ -565,14 +475,14 @@ function EditorInner() {
         type="file"
         accept="image/*"
         className="hidden"
-        onChange={e => handleFileInsert(e.target.files?.[0], "image")}
+        onChange={e => handleMediaInsert(e.target.files?.[0], "image")}
       />
       <input
         ref={vidInputRef}
         type="file"
         accept="video/*"
         className="hidden"
-        onChange={e => handleFileInsert(e.target.files?.[0], "video")}
+        onChange={e => handleMediaInsert(e.target.files?.[0], "video")}
       />
 
       {/* ── トースト通知 ── */}
