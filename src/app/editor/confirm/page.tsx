@@ -2,17 +2,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
-
-/* ══════════════════════════════════════
-   型
-══════════════════════════════════════ */
-interface SlotImage {
-  id:       string;   // src の先頭 50 文字をキーにする
-  src:      string;
-  slotName: string;
-}
 
 /* ══════════════════════════════════════
    公開確認ページ
@@ -22,8 +12,6 @@ export default function ConfirmPage() {
 
   const [title,    setTitle]    = useState("（タイトル未入力）");
   const [bodyHtml, setBodyHtml] = useState("");
-  const [images,   setImages]   = useState<SlotImage[]>([]);
-  const [pageIndex, setPageIndex] = useState(0);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "done" | "error">("idle");
   const [toast,    setToast]    = useState<string | null>(null);
 
@@ -33,17 +21,6 @@ export default function ConfirmPage() {
     const b = localStorage.getItem("nf_editor_body")  ?? "";
     setTitle(t);
     setBodyHtml(b);
-
-    /* img タグを抽出 */
-    const imgRe = /<img[^>]+src="([^"]+)"[^>]*>/gi;
-    const found: SlotImage[] = [];
-    let m: RegExpExecArray | null;
-    let idx = 0;
-    while ((m = imgRe.exec(b)) !== null) {
-      found.push({ id: `img_${idx}`, src: m[1], slotName: `画像${idx + 1}` });
-      idx++;
-    }
-    setImages(found);
   }, []);
 
   /* トースト自動消滅 */
@@ -52,14 +29,6 @@ export default function ConfirmPage() {
     const t = setTimeout(() => setToast(null), 3000);
     return () => clearTimeout(t);
   }, [toast]);
-
-  /* ページ分割（page-break-block で分割） */
-  const pages = bodyHtml
-    .split(/<div class="page-break-block"[^>]*>[\s\S]*?<\/div>/g)
-    .map(p => p.trim())
-    .filter(Boolean);
-  if (pages.length === 0) pages.push(bodyHtml);
-  const totalPages = pages.length;
 
   /* 下書き保存 */
   const saveDraft = useCallback(async () => {
@@ -83,8 +52,29 @@ export default function ConfirmPage() {
     }
   }, [title, bodyHtml]);
 
-  /* 公開 */
-  const publish = useCallback(async () => {
+  /* パックなしで公開 */
+  const publishWithoutPack = useCallback(async () => {
+    setSaveState("saving");
+    try {
+      const client = createClient();
+      const bodyJson = { html: bodyHtml };
+      const { data: { user } } = await client.auth.getUser();
+      if (user) {
+        await client.from("episodes")
+          .insert({ title, body_json: bodyJson as never, is_published: true, sort_order: 0, work_id: "" })
+          .select("id").single();
+      }
+      setSaveState("done");
+      setToast("公開しました！");
+      setTimeout(() => router.push("/mypage"), 1500);
+    } catch {
+      setSaveState("error");
+      setToast("公開に失敗しました");
+    }
+  }, [title, bodyHtml, router]);
+
+  /* パックあり公開 */
+  const publishWithPack = useCallback(async () => {
     setSaveState("saving");
     try {
       const client = createClient();
@@ -118,60 +108,28 @@ export default function ConfirmPage() {
         <span className="text-[10.5px] text-text-3">公開前の確認</span>
       </div>
 
-      <div className="flex flex-1 min-h-0">
+      {/* コンテンツ */}
+      <div className="flex-1 flex items-start justify-center px-4 py-8">
+        <div className="w-full max-w-[480px] flex flex-col gap-4">
 
-        {/* ── 左：プレビュー ── */}
-        <div className="flex-1 min-w-0 overflow-y-auto bg-[#0d0c16]">
-          <div className="max-w-[660px] mx-auto px-6 py-8">
-
-            {/* ページ切り替えバー */}
-            {totalPages > 1 && (
-              <div className="flex items-center justify-between mb-6 p-3 bg-bg-card rounded-xl border border-border">
-                <button
-                  onClick={() => setPageIndex(i => Math.max(0, i - 1))}
-                  disabled={pageIndex === 0}
-                  className="text-[11px] px-3 py-1.5 rounded-lg bg-bg-card2 border border-border text-text-2 disabled:opacity-30 hover:text-text-1 transition-colors">
-                  ‹ 前
-                </button>
-                <div className="flex items-center gap-2">
-                  {Array.from({ length: totalPages }).map((_, i) => (
-                    <button key={i} onClick={() => setPageIndex(i)}
-                      className={cn("w-2 h-2 rounded-full transition-all",
-                        i === pageIndex ? "bg-accent scale-125" : "bg-white/20 hover:bg-white/40")} />
-                  ))}
-                  <span className="text-[10.5px] text-text-3 ml-2">{pageIndex + 1} / {totalPages}</span>
-                </div>
-                <button
-                  onClick={() => setPageIndex(i => Math.min(totalPages - 1, i + 1))}
-                  disabled={pageIndex === totalPages - 1}
-                  className="text-[11px] px-3 py-1.5 rounded-lg bg-bg-card2 border border-border text-text-2 disabled:opacity-30 hover:text-text-1 transition-colors">
-                  次 ›
-                </button>
-              </div>
-            )}
-
-            {/* タイトル（1ページ目のみ） */}
-            {pageIndex === 0 && (
-              <h1 className="font-serif text-[22px] font-normal text-text-1 mb-6 pb-5 border-b border-border"
-                style={{ fontFamily: "var(--font-serif)" }}>
-                {title}
-              </h1>
-            )}
-
-            {/* 本文 */}
-            <div
-              className="text-[15px] leading-[2.1] text-text-1 preview-body"
-              style={{ fontFamily: "'Noto Serif JP', serif" }}
-              dangerouslySetInnerHTML={{ __html: pages[pageIndex] ?? "" }}
-            />
+          {/* タイトル表示 */}
+          <div className="px-4 py-3 bg-bg-card rounded-xl border border-border">
+            <p className="text-[9.5px] text-text-3 uppercase tracking-widest mb-1">タイトル</p>
+            <p className="text-[15px] text-text-1 font-serif">{title}</p>
           </div>
-        </div>
 
-        {/* ── 右：操作パネル ── */}
-        <div className="w-[280px] flex-shrink-0 bg-[#0f0e18] border-l border-border overflow-y-auto flex flex-col">
+          {/* プレビューボタン */}
+          <Link href="/editor/preview"
+            className="flex items-center justify-center gap-2 py-3 rounded-xl border border-white/15 bg-white/4 text-[13px] text-text-1 hover:bg-white/8 transition-colors">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7">
+              <circle cx="8" cy="8" r="3"/><path d="M1 8s3-5 7-5 7 5 7 5-3 5-7 5-7-5-7-5z"/>
+            </svg>
+            プレビューを見る
+          </Link>
 
-          {/* ① 下書き保存 */}
-          <PanelSection title="下書き保存" icon="💾">
+          {/* 下書き保存 */}
+          <div className="px-4 py-4 bg-bg-card rounded-xl border border-border">
+            <p className="text-[9.5px] text-text-3 uppercase tracking-widest mb-2">下書き保存</p>
             <p className="text-[10.5px] text-text-3 mb-3 leading-relaxed">
               内容をSupabaseに保存します。公開はしません。
             </p>
@@ -181,58 +139,37 @@ export default function ConfirmPage() {
               className="w-full py-2 rounded-xl border border-border-2 text-[12px] text-text-2 hover:text-text-1 hover:border-accent/40 transition-all disabled:opacity-50">
               {saveState === "saving" ? "保存中…" : "下書きを保存"}
             </button>
-          </PanelSection>
+          </div>
 
-          {/* ② 画像スロット管理 */}
-          <PanelSection title="画像のファイル化" icon="🖼️">
-            {images.length === 0 ? (
-              <p className="text-[10.5px] text-text-3 leading-relaxed">
-                挿入済みの画像がありません
-              </p>
-            ) : (
-              <div className="flex flex-col gap-3">
-                {images.map((img, i) => (
-                  <div key={img.id} className="flex flex-col gap-1.5">
-                    {/* サムネイル */}
-                    <div className="w-full h-[80px] rounded-lg overflow-hidden bg-bg-card border border-border">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={img.src} alt={img.slotName} className="w-full h-full object-cover" />
-                    </div>
-                    {/* スロット名入力 */}
-                    <input
-                      value={img.slotName}
-                      onChange={e => setImages(prev => prev.map((im, j) =>
-                        j === i ? { ...im, slotName: e.target.value } : im
-                      ))}
-                      placeholder="スロット名（例：有村架純①）"
-                      className="input-dark text-[10.5px] w-full"
-                    />
-                  </div>
-                ))}
-
-                <button
-                  onClick={() => setToast("パックファイルの作成機能は近日公開予定です")}
-                  className="w-full py-2 mt-1 rounded-xl border border-blue/30 text-[12px] text-[#85b7eb] bg-blue/8 hover:bg-blue/15 transition-all">
-                  📦 パックファイルを作成
-                </button>
-              </div>
-            )}
-          </PanelSection>
-
-          {/* ③ 公開ボタン */}
-          <div className="p-4 mt-auto border-t border-border">
-            <p className="text-[10px] text-text-3 mb-3 leading-relaxed">
-              公開すると読者が読めるようになります。<br />
-              後から下書きに戻すことも可能です。
+          {/* 公開セクション */}
+          <div className="px-4 py-4 bg-bg-card rounded-xl border border-border flex flex-col gap-3">
+            <p className="text-[9.5px] text-text-3 uppercase tracking-widest">公開する</p>
+            <p className="text-[10px] text-text-3 leading-relaxed">
+              公開すると読者が読めるようになります。後から下書きに戻すことも可能です。
             </p>
+
+            {/* パックなしで公開 */}
             <button
-              onClick={() => void publish()}
+              onClick={() => void publishWithoutPack()}
+              disabled={saveState === "saving"}
+              className="w-full py-3 rounded-2xl border border-white/20 bg-white/6 text-white text-[13px] font-medium hover:bg-white/12 transition-colors disabled:opacity-50">
+              {saveState === "saving" ? "公開中…" : "画像をそのまま公開"}
+            </button>
+
+            {/* パックあり公開（メイン） */}
+            <button
+              onClick={() => void publishWithPack()}
               disabled={saveState === "saving"}
               className="w-full py-3 rounded-2xl bg-accent-2 text-white text-[13px] font-medium hover:bg-accent transition-colors disabled:opacity-50"
               style={{ boxShadow: "0 4px 16px rgba(83,74,183,0.35)" }}>
-              {saveState === "saving" ? "公開中…" : "✓ 公開する"}
+              {saveState === "saving" ? "公開中…" : "✓ 公開する（パックあり）"}
             </button>
+
+            <p className="text-[9.5px] text-text-3 text-center leading-relaxed">
+              「パックあり」はメディアパックを読者が購入・適用して楽しむ形式です
+            </p>
           </div>
+
         </div>
       </div>
 
@@ -247,29 +184,6 @@ export default function ConfirmPage() {
           </div>
         </div>
       )}
-
-      {/* img タグのスロット名ラベルを読者側で非表示にするグローバルスタイル */}
-      <style>{`
-        .preview-body img { max-width: 100%; border-radius: 8px; margin: 8px 0; display: block; }
-        .preview-body video { max-width: 100%; border-radius: 8px; margin: 8px 0; display: block; }
-      `}</style>
-    </div>
-  );
-}
-
-/* ══════════════════════════════════════
-   サブコンポーネント
-══════════════════════════════════════ */
-function PanelSection({ title, icon, children }: {
-  title: string; icon: string; children: React.ReactNode;
-}) {
-  return (
-    <div className="border-b border-border p-4">
-      <div className="flex items-center gap-1.5 mb-3">
-        <span className="text-[14px]">{icon}</span>
-        <span className="text-[10px] font-medium text-text-3 uppercase tracking-widest">{title}</span>
-      </div>
-      {children}
     </div>
   );
 }

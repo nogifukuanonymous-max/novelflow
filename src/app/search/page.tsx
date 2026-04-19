@@ -1,11 +1,10 @@
 "use client";
-import { useState, useMemo } from "react";
-import Link from "next/link";
+import { useState, useEffect, useCallback } from "react";
 import { GlobalNav } from "@/components/layout/Nav";
 import { NovelCard } from "@/components/works/WorkCard";
-import { MOCK_WORKS } from "@/lib/mock-data";
+import { fetchWorks } from "@/lib/supabase/queries";
 import { cn } from "@/lib/utils";
-import type { Work } from "@/types";
+import type { Work, Genre, SerialStatus } from "@/types";
 
 /* ══════════════════════════════════════
    定数
@@ -30,7 +29,7 @@ const STATUS_OPTIONS = [
 ] as const;
 
 const SORT_OPTIONS = [
-  { value: "like",       label: "いいね順" },
+  { value: "popular",    label: "いいね順" },
   { value: "new",        label: "新着順" },
   { value: "char",       label: "文字数順" },
 ] as const;
@@ -42,28 +41,42 @@ export default function SearchPage() {
   const [query,  setQuery]  = useState("");
   const [genre,  setGenre]  = useState("");
   const [status, setStatus] = useState("");
-  const [sort,   setSort]   = useState<"like" | "new" | "char">("like");
+  const [sort,   setSort]   = useState<"popular" | "new" | "char">("popular");
+  const [works,  setWorks]  = useState<Work[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const results = useMemo<Work[]>(() => {
-    let list = [...MOCK_WORKS];
-
-    if (query.trim()) {
-      const q = query.trim().toLowerCase();
-      list = list.filter(w =>
-        w.title.toLowerCase().includes(q) ||
-        (w.synopsis ?? "").toLowerCase().includes(q) ||
-        w.author.displayName.toLowerCase().includes(q)
-      );
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { works: data } = await fetchWorks({
+        genre:        genre  ? genre  as Genre         : undefined,
+        serialStatus: status ? status as SerialStatus  : undefined,
+        sort:         sort === "char" ? "popular" : sort,
+        limit:        100,
+      });
+      setWorks(data);
+    } catch {
+      setWorks([]);
+    } finally {
+      setLoading(false);
     }
-    if (genre)  list = list.filter(w => w.genre === genre);
-    if (status) list = list.filter(w => w.serialStatus === status);
+  }, [genre, status, sort]);
 
-    if (sort === "like") list.sort((a, b) => b.likeCount - a.likeCount);
-    if (sort === "new")  list.sort((a, b) => new Date(b.publishedAt ?? 0).getTime() - new Date(a.publishedAt ?? 0).getTime());
-    if (sort === "char") list.sort((a, b) => b.totalCharCount - a.totalCharCount);
+  useEffect(() => { void load(); }, [load]);
 
-    return list;
-  }, [query, genre, status, sort]);
+  /* クライアントサイドフィルタ（テキスト検索・文字数ソート） */
+  let results = [...works];
+  if (query.trim()) {
+    const q = query.trim().toLowerCase();
+    results = results.filter(w =>
+      w.title.toLowerCase().includes(q) ||
+      (w.synopsis ?? "").toLowerCase().includes(q) ||
+      w.author.displayName.toLowerCase().includes(q)
+    );
+  }
+  if (sort === "char") {
+    results.sort((a, b) => b.totalCharCount - a.totalCharCount);
+  }
 
   return (
     <>
@@ -165,14 +178,20 @@ export default function SearchPage() {
               {/* 結果件数 + ソート */}
               <div className="flex items-center justify-between mb-5">
                 <p className="text-[12px] text-text-3">
-                  <span className="text-text-1 font-medium">{results.length}</span> 件
-                  {(query || genre || status) && (
-                    <button
-                      onClick={() => { setQuery(""); setGenre(""); setStatus(""); }}
-                      className="ml-3 text-[11px] text-accent hover:text-accent-lt transition-colors"
-                    >
-                      フィルターをクリア
-                    </button>
+                  {loading ? (
+                    <span className="text-text-3">読み込み中…</span>
+                  ) : (
+                    <>
+                      <span className="text-text-1 font-medium">{results.length}</span> 件
+                      {(query || genre || status) && (
+                        <button
+                          onClick={() => { setQuery(""); setGenre(""); setStatus(""); }}
+                          className="ml-3 text-[11px] text-accent hover:text-accent-lt transition-colors"
+                        >
+                          フィルターをクリア
+                        </button>
+                      )}
+                    </>
                   )}
                 </p>
                 <div className="flex gap-1">
@@ -193,7 +212,9 @@ export default function SearchPage() {
                 </div>
               </div>
 
-              {results.length === 0 ? (
+              {loading ? (
+                <LoadingState />
+              ) : results.length === 0 ? (
                 <EmptyState />
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">
@@ -218,6 +239,16 @@ function FilterSection({ title, children }: { title: string; children: React.Rea
     <div className="mb-6">
       <p className="text-[9.5px] text-text-3 uppercase tracking-widest mb-2 px-1">{title}</p>
       {children}
+    </div>
+  );
+}
+
+function LoadingState() {
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">
+      {Array.from({ length: 10 }).map((_, i) => (
+        <div key={i} className="aspect-[2/3] rounded-xl bg-bg-card animate-pulse" />
+      ))}
     </div>
   );
 }

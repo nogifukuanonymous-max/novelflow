@@ -249,7 +249,7 @@ function EditorInner() {
   };
 
   return (
-    <div className="h-dvh flex flex-col bg-bg text-text-1 font-sans overflow-hidden">
+    <div className="flex flex-col bg-bg text-text-1 font-sans lg:h-dvh lg:overflow-hidden min-h-dvh">
 
       {/* ── トップバー ── */}
       <div className="flex items-center gap-2.5 px-4 h-12 bg-[#111019] border-b border-border flex-shrink-0">
@@ -263,18 +263,18 @@ function EditorInner() {
           <span className="text-text-2">{title || "（タイトル未入力）"}</span>
         </div>
         <div className={cn(
-          "flex items-center gap-1.5 text-[10.5px] flex-shrink-0",
+          "hidden sm:flex items-center gap-1.5 text-[10.5px] flex-shrink-0",
           saveState === "saved"  ? "text-teal/80" :
           saveState === "saving" ? "text-amber/70" : "text-text-3"
         )}>
           {saveState === "saved"  && <><CheckIcon /> 自動保存済み</>}
           {saveState === "saving" && <><ClockIcon /> 保存中…</>}
         </div>
-        <div className="text-[11px] text-text-3 px-3 border-x border-border flex-shrink-0">
+        <div className="hidden sm:block text-[11px] text-text-3 px-3 border-x border-border flex-shrink-0">
           {charCount.toLocaleString()}字
         </div>
         <button onClick={() => void saveDraft()}
-          className="text-[11px] px-3 py-1.5 rounded-2xl border border-border-2 text-text-2 hover:border-accent hover:text-accent-lt transition-all flex-shrink-0">
+          className="hidden sm:block text-[11px] px-3 py-1.5 rounded-2xl border border-border-2 text-text-2 hover:border-accent hover:text-accent-lt transition-all flex-shrink-0">
           下書き保存
         </button>
         <button
@@ -292,13 +292,13 @@ function EditorInner() {
       </div>
 
       {/* ── メインレイアウト ── */}
-      <div className="flex flex-1 min-h-0">
+      <div className="flex flex-1 lg:min-h-0">
 
         {/* エディタ本体 */}
         <div className="flex-1 flex flex-col min-w-0">
 
           {/* ツールバー */}
-          <div className="flex items-center gap-1 px-3 py-1.5 bg-[#111019] border-b border-border flex-shrink-0">
+          <div className="flex items-center gap-1 px-3 py-1.5 bg-[#111019] border-b border-border flex-shrink-0 overflow-x-auto scrollbar-none">
 
             {/* ↩ 戻る / ↪ やり直し */}
             <ToolGroup>
@@ -349,7 +349,7 @@ function EditorInner() {
           </div>
 
           {/* 本文エリア */}
-          <div className="flex-1 overflow-y-auto">
+          <div className="flex-1 lg:overflow-y-auto">
             <div className="max-w-[700px] mx-auto px-8 py-6 pb-24">
               <input
                 value={title}
@@ -476,6 +476,27 @@ function EditorInner() {
           onClose={() => setPreviewOpen(false)}
         />
       )}
+
+      {/* ── モバイル用スティッキーフッター ── */}
+      <div className="sm:hidden sticky bottom-0 z-30 flex items-center gap-2 px-4 py-3 bg-[#111019]/95 backdrop-blur-sm border-t border-border">
+        <div className="text-[10.5px] text-text-3 mr-auto">{charCount.toLocaleString()}字</div>
+        <button onClick={() => void saveDraft()}
+          className="text-[11px] px-3 py-2 rounded-2xl border border-border-2 text-text-2 hover:border-accent hover:text-accent-lt transition-all">
+          下書き保存
+        </button>
+        <button
+          onClick={() => {
+            if (editorRef.current) {
+              localStorage.setItem("nf_editor_title", title);
+              localStorage.setItem("nf_editor_body", editorRef.current.innerHTML);
+            }
+            router.push("/editor/confirm");
+          }}
+          className="text-[11px] px-4 py-2 rounded-2xl bg-accent-2 text-white hover:bg-accent transition-colors"
+          style={{ boxShadow: "0 2px 10px rgba(83,74,183,0.3)" }}>
+          公開する ›
+        </button>
+      </div>
 
       {/* ── 隠しファイル入力 ── */}
       <input
