@@ -1,8 +1,6 @@
 "use client";
 import { useState, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { Toggle, RadioCard } from "@/components/ui";
 import type { ReadingMode } from "@/types";
@@ -35,7 +33,6 @@ const CHAR_COLORS = [
    メインエディタ
 ══════════════════════════════════════ */
 export default function EditorPage() {
-  const router = useRouter();
   const [title, setTitle]         = useState("交差する夜明け");
   const [charCount, setCharCount] = useState(0);
   const [saveState, setSaveState] = useState<"saved" | "saving" | "unsaved">("saved");
@@ -44,18 +41,23 @@ export default function EditorPage() {
   const [readingMode, setReadingMode] = useState<ReadingMode>("both");
   const [chars, setChars]         = useState<Char[]>(INIT_CHARS);
   const [charModalOpen, setCharModalOpen] = useState(false);
-  const [editingChar, setEditingChar] = useState<Char | null>(null);
+  const [editingChar, setEditingChar]     = useState<Char | null>(null);
   const [tagPopoverOpen, setTagPopoverOpen] = useState(false);
   const [tagPopoverPos, setTagPopoverPos]   = useState({ x: 0, y: 0 });
-  const [previewOpen, setPreviewOpen] = useState(false);
-  const [savedRange, setSavedRange]   = useState<Range | null>(null);
+  const [previewOpen, setPreviewOpen]       = useState(false);
+  const [savedRange, setSavedRange]         = useState<Range | null>(null);
+
+  // 画像スロット名ダイアログ
+  const [slotDialogOpen, setSlotDialogOpen]   = useState(false);
+  const [slotDialogType, setSlotDialogType]   = useState<"image" | "video">("image");
+  const [slotDialogName, setSlotDialogName]   = useState("");
 
   // サイドパネルセクション開閉
   const [secOpen, setSecOpen] = useState({ pub: true, mode: true, chars: true });
   const toggleSec = (k: keyof typeof secOpen) =>
     setSecOpen(s => ({ ...s, [k]: !s[k] }));
 
-  const editorRef = useRef<HTMLDivElement>(null);
+  const editorRef    = useRef<HTMLDivElement>(null);
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout>>();
 
   /* 初期コンテンツ */
@@ -76,10 +78,8 @@ export default function EditorPage() {
     clearTimeout(autoSaveTimer.current);
     setSaveState("saving");
     autoSaveTimer.current = setTimeout(async () => {
-      // TODO: 実際はAPIコール
       await new Promise(r => setTimeout(r, 400));
       setSaveState("saved");
-      // localStorage にキャッシュ
       if (editorRef.current) {
         localStorage.setItem("nf_editor_title", title);
         localStorage.setItem("nf_editor_body", editorRef.current.innerHTML);
@@ -95,6 +95,9 @@ export default function EditorPage() {
       if (k === "b") { e.preventDefault(); document.execCommand("bold"); }
       if (k === "i") { e.preventDefault(); document.execCommand("italic"); }
       if (k === "u") { e.preventDefault(); document.execCommand("underline"); }
+      if (k === "z" && !e.shiftKey) { e.preventDefault(); document.execCommand("undo"); }
+      if (k === "z" &&  e.shiftKey) { e.preventDefault(); document.execCommand("redo"); }
+      if (k === "y")               { e.preventDefault(); document.execCommand("redo"); }
       if (k === "s") { e.preventDefault(); scheduleAutosave(); }
     };
     window.addEventListener("keydown", h);
@@ -128,33 +131,68 @@ export default function EditorPage() {
     scheduleAutosave();
   };
 
-  /* ── メディア挿入 ── */
-  const insertMedia = (type: "image" | "video") => {
-    const emoji = type === "image" ? "🖼️" : "🎬";
-    const badge = type === "image" ? "画像" : "動画";
-    const badgeCls = type === "image" ? "bg-blue/20 text-[#85b7eb]" : "bg-coral/20 text-[#f0997b]";
-    const filename = `${type}_${Date.now()}.${type === "image" ? "jpg" : "mp4"}`;
+  /* ── 画像スロット挿入（ダイアログ経由） ── */
+  const openSlotDialog = (type: "image" | "video") => {
+    // カーソル位置を保存
+    const sel = window.getSelection();
+    if (sel?.rangeCount) setSavedRange(sel.getRangeAt(0).cloneRange());
+    setSlotDialogType(type);
+    setSlotDialogName("");
+    setSlotDialogOpen(true);
+  };
+
+  const insertMediaSlot = (slotName: string) => {
+    const type    = slotDialogType;
+    const emoji   = type === "image" ? "🖼️" : "🎬";
+    const badgeCls = type === "image"
+      ? "background:rgba(133,183,235,0.2);color:#85b7eb;"
+      : "background:rgba(240,153,123,0.2);color:#f0997b;";
+    const badge    = type === "image" ? "画像スロット" : "動画スロット";
+    const slotId   = `slot_${Date.now()}`;
+
     const html = `
-<div class="media-block" contenteditable="false" style="margin:16px 0;border-radius:10px;border:0.5px solid rgba(255,255,255,0.13);overflow:hidden;background:#13121c;">
-  <div style="height:140px;background:linear-gradient(135deg,#1e1040,#6b3a8a);display:flex;align-items:center;justify-content:center;font-size:32px;">${emoji}</div>
-  <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:rgba(0,0,0,0.3);border-top:0.5px solid rgba(255,255,255,0.07);">
-    <span style="font-size:10px;color:rgba(255,255,255,0.5);flex:1;">${filename}</span>
-    <span style="font-size:9px;padding:2px 7px;border-radius:8px;" class="${badgeCls}">${badge}</span>
-    <button onclick="this.closest('.media-block').remove()" style="font-size:10px;color:rgba(240,153,123,0.7);padding:2px 6px;border-radius:4px;background:rgba(255,255,255,0.04);border:0.5px solid rgba(255,255,255,0.07);">削除</button>
+<div class="media-slot-block" contenteditable="false" data-slot-id="${slotId}" data-slot-type="${type}" data-slot-name="${slotName}"
+  style="margin:20px 0;border-radius:12px;border:1.5px dashed rgba(133,183,235,0.35);overflow:hidden;background:rgba(133,183,235,0.04);">
+  <div style="padding:18px 16px 14px;display:flex;align-items:center;gap:12px;">
+    <div style="width:56px;height:56px;border-radius:10px;background:rgba(133,183,235,0.12);border:1px solid rgba(133,183,235,0.2);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0;">${emoji}</div>
+    <div style="flex:1;min-width:0;">
+      <p style="font-size:15px;font-weight:600;color:#d4e8ff;margin:0 0 3px;">${slotName || "(名前未設定)"}</p>
+      <p style="font-size:10px;color:rgba(255,255,255,0.35);margin:0;">未設定 — 後からファイルをアップロードできます</p>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:5px;">
+      <span style="font-size:9px;padding:2px 8px;border-radius:8px;${badgeCls}">${badge}</span>
+      <button onclick="this.closest('.media-slot-block').remove()" style="font-size:10px;color:rgba(240,153,123,0.6);padding:2px 7px;border-radius:4px;background:rgba(255,255,255,0.04);border:0.5px solid rgba(255,255,255,0.07);">削除</button>
+    </div>
   </div>
-  <div style="padding:5px 10px;background:rgba(0,0,0,0.2);border-top:0.5px solid rgba(255,255,255,0.05);">
-    <input placeholder="キャプション・alt テキスト…" style="width:100%;background:transparent;border:none;outline:none;font-size:11px;color:rgba(255,255,255,0.4);" />
-  </div>
+</div>`;
+
+    if (editorRef.current) {
+      editorRef.current.focus();
+      if (savedRange) {
+        const sel = window.getSelection();
+        sel?.removeAllRanges();
+        sel?.addRange(savedRange);
+      }
+      document.execCommand("insertHTML", false, html);
+    }
+    setSlotDialogOpen(false);
+    updateCount();
+    scheduleAutosave();
+  };
+
+  /* ── ページ切り替えブロック挿入 ── */
+  const insertPageBreak = () => {
+    const html = `
+<div class="page-break-block" contenteditable="false"
+  style="margin:24px 0;display:flex;align-items:center;gap:10px;user-select:none;">
+  <div style="flex:1;height:1px;background:linear-gradient(to right,transparent,rgba(122,93,199,0.5));"></div>
+  <span style="font-size:10px;color:rgba(122,93,199,0.8);letter-spacing:0.15em;padding:4px 12px;border-radius:20px;border:1px solid rgba(122,93,199,0.3);background:rgba(122,93,199,0.08);white-space:nowrap;">― ページ切り替え ―</span>
+  <div style="flex:1;height:1px;background:linear-gradient(to left,transparent,rgba(122,93,199,0.5));"></div>
 </div>`;
     editorRef.current?.focus();
     document.execCommand("insertHTML", false, html);
     updateCount();
     scheduleAutosave();
-  };
-
-  /* ── プレビュー ── */
-  const openPreview = () => {
-    setPreviewOpen(true);
   };
 
   /* ── キャラクター保存 ── */
@@ -183,7 +221,6 @@ export default function EditorPage() {
           花と雨の形而上学 <span className="text-text-3 mx-1">›</span>
           <span className="text-text-2">{title || "（タイトル未入力）"}</span>
         </div>
-        {/* 自動保存状態 */}
         <div className={cn(
           "flex items-center gap-1.5 text-[10.5px] flex-shrink-0",
           saveState === "saved"  ? "text-teal/80" :
@@ -211,50 +248,88 @@ export default function EditorPage() {
 
         {/* エディタ本体 */}
         <div className="flex-1 flex flex-col min-w-0">
+
           {/* ツールバー */}
           <div className="flex items-center gap-1 px-3 py-1.5 bg-[#111019] border-b border-border flex-wrap flex-shrink-0">
+
+            {/* 元に戻す / やり直し */}
             <ToolGroup>
-              <TbBtn title="太字" onClick={() => document.execCommand("bold")}>
+              <TbBtn title="元に戻す (Ctrl+Z)" onClick={() => document.execCommand("undo")}>
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8">
+                  <path d="M3 7H11a4 4 0 010 8H7"/><path d="M3 7L6 4M3 7l3 3"/>
+                </svg>
+              </TbBtn>
+              <TbBtn title="やり直し (Ctrl+Y)" onClick={() => document.execCommand("redo")}>
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8">
+                  <path d="M13 7H5a4 4 0 000 8H9"/><path d="M13 7l-3-3M13 7l-3 3"/>
+                </svg>
+              </TbBtn>
+            </ToolGroup>
+
+            {/* テキスト装飾 */}
+            <ToolGroup>
+              <TbBtn title="太字 (Ctrl+B)" onClick={() => document.execCommand("bold")}>
                 <svg width="11" height="11" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3 2h5a3 3 0 010 6H3V2zM3 8h6a3 3 0 010 6H3V8z"/></svg>
               </TbBtn>
-              <TbBtn title="イタリック" onClick={() => document.execCommand("italic")}>
+              <TbBtn title="イタリック (Ctrl+I)" onClick={() => document.execCommand("italic")}>
                 <svg width="11" height="11" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2"><line x1="8" y1="2" x2="6" y2="12"/><line x1="5" y1="2" x2="11" y2="2"/><line x1="3" y1="12" x2="9" y2="12"/></svg>
               </TbBtn>
-              <TbBtn title="下線" onClick={() => document.execCommand("underline")}>
+              <TbBtn title="下線 (Ctrl+U)" onClick={() => document.execCommand("underline")}>
                 <svg width="11" height="11" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 2v5a4 4 0 008 0V2"/><line x1="2" y1="13" x2="12" y2="13"/></svg>
               </TbBtn>
             </ToolGroup>
+
+            {/* 見出し・区切り */}
             <ToolGroup>
-              <TbBtnWide title="H1" onClick={() => document.execCommand("formatBlock", false, "h2")}>H1</TbBtnWide>
-              <TbBtnWide title="H2" onClick={() => document.execCommand("formatBlock", false, "h3")}>H2</TbBtnWide>
-              <TbBtn title="区切り線" onClick={() => document.execCommand("insertHTML", false, '<hr style="border:none;border-top:0.5px solid rgba(255,255,255,0.15);margin:20px 0;">')}>
+              <TbBtnWide title="大見出し" onClick={() => document.execCommand("formatBlock", false, "h2")}>H1</TbBtnWide>
+              <TbBtnWide title="小見出し" onClick={() => document.execCommand("formatBlock", false, "h3")}>H2</TbBtnWide>
+              <TbBtn title="水平線" onClick={() => document.execCommand("insertHTML", false, '<hr style="border:none;border-top:0.5px solid rgba(255,255,255,0.15);margin:20px 0;">')}>
                 <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8"><line x1="2" y1="8" x2="14" y2="8"/></svg>
               </TbBtn>
             </ToolGroup>
+
+            {/* 名前タグ */}
             <ToolGroup>
               <button id="tagInsertBtn" onClick={openTagPopover}
                 className="flex items-center gap-1.5 px-2.5 h-7 rounded-md text-[10.5px] text-accent-lt bg-accent/15 border border-accent-lt/25 hover:bg-accent/25 transition-colors">
                 <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6"><circle cx="6" cy="4" r="2.5"/><path d="M2 10c0-2.2 1.8-4 4-4s4 1.8 4 4"/></svg>
-                名前タグ挿入
+                名前タグ
               </button>
             </ToolGroup>
+
+            {/* メディアスロット */}
             <ToolGroup>
-              <button onClick={() => insertMedia("image")}
+              <button onClick={() => openSlotDialog("image")}
                 className="flex items-center gap-1 px-2.5 h-7 rounded-md text-[10.5px] text-[#85b7eb] bg-blue/12 border border-blue/25 hover:bg-blue/20 transition-colors">
                 <svg width="10" height="10" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6"><rect x="1" y="2" width="12" height="10" rx="1.5"/><path d="M1 9l3-3 3 3 2-2 4 3"/></svg>
-                画像
+                画像スロット
               </button>
-              <button onClick={() => insertMedia("video")}
+              <button onClick={() => openSlotDialog("video")}
                 className="flex items-center gap-1 px-2.5 h-7 rounded-md text-[10.5px] text-[#f0997b] bg-coral/12 border border-coral/25 hover:bg-coral/20 transition-colors">
                 <svg width="10" height="10" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6"><rect x="1" y="2" width="10" height="10" rx="1.5"/><path d="M11 6l3-2v6l-3-2"/></svg>
-                動画
+                動画スロット
               </button>
             </ToolGroup>
+
+            {/* ページ切り替え */}
             <ToolGroup>
-              <TbBtnWide title="プレビュー" onClick={openPreview}>
+              <button onClick={insertPageBreak}
+                className="flex items-center gap-1.5 px-2.5 h-7 rounded-md text-[10.5px] text-[#c5b3ff] bg-accent/12 border border-accent-lt/25 hover:bg-accent/22 transition-colors">
+                <svg width="10" height="10" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6">
+                  <rect x="1" y="1" width="5.5" height="12" rx="1"/>
+                  <rect x="7.5" y="1" width="5.5" height="12" rx="1"/>
+                </svg>
+                ページ切り替え
+              </button>
+            </ToolGroup>
+
+            {/* プレビュー */}
+            <ToolGroup>
+              <button onClick={() => setPreviewOpen(true)}
+                className="flex items-center gap-1.5 px-2.5 h-7 rounded-md text-[10.5px] text-text-2 hover:bg-white/7 hover:text-text-1 transition-colors">
                 <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7"><circle cx="8" cy="8" r="3"/><path d="M1 8s3-5 7-5 7 5 7 5-3 5-7 5-7-5-7-5z"/></svg>
-                プレビュー
-              </TbBtnWide>
+                👁 プレビュー
+              </button>
             </ToolGroup>
           </div>
 
@@ -289,16 +364,10 @@ export default function EditorPage() {
 
         {/* サイドパネル */}
         <div className="w-[220px] flex-shrink-0 bg-[#0f0e18] border-l border-border overflow-y-auto hidden lg:block">
-
-          {/* 公開設定 */}
           <SideSection title="公開設定" open={secOpen.pub} onToggle={() => toggleSec("pub")}>
             <div className="flex flex-col gap-3">
-              <SideRow label="公開状態">
-                <Toggle checked={isPublished} onChange={setIsPublished} />
-              </SideRow>
-              <SideRow label="予約投稿">
-                <Toggle checked={isScheduled} onChange={setIsScheduled} />
-              </SideRow>
+              <SideRow label="公開状態"><Toggle checked={isPublished} onChange={setIsPublished} /></SideRow>
+              <SideRow label="予約投稿"><Toggle checked={isScheduled} onChange={setIsScheduled} /></SideRow>
               {isScheduled && (
                 <input type="datetime-local"
                   className="w-full bg-bg-card2 border border-border rounded-md px-2 py-1.5 text-[10px] text-text-2 outline-none" />
@@ -309,7 +378,6 @@ export default function EditorPage() {
             </div>
           </SideSection>
 
-          {/* 読書モード */}
           <SideSection title="読書モード" open={secOpen.mode} onToggle={() => toggleSec("mode")}>
             <div className="flex flex-col gap-1">
               {(["both","scroll_only","flip_only"] as ReadingMode[]).map(m => (
@@ -319,7 +387,6 @@ export default function EditorPage() {
             </div>
           </SideSection>
 
-          {/* 名前変換キャラ */}
           <SideSection title="名前変換キャラ" open={secOpen.chars} onToggle={() => toggleSec("chars")}>
             <div className="flex flex-col gap-1.5">
               {chars.map(c => (
@@ -334,16 +401,13 @@ export default function EditorPage() {
                     className="text-[9.5px] text-text-3 hover:text-accent-lt transition-colors flex-shrink-0">編集</button>
                 </div>
               ))}
-              <button
-                onClick={() => { setEditingChar(null); setCharModalOpen(true); }}
-                className="text-[11px] text-accent py-1.5 rounded-lg border border-dashed border-accent-lt/25 hover:bg-accent-dim transition-colors mt-1"
-              >
+              <button onClick={() => { setEditingChar(null); setCharModalOpen(true); }}
+                className="text-[11px] text-accent py-1.5 rounded-lg border border-dashed border-accent-lt/25 hover:bg-accent-dim transition-colors mt-1">
                 ＋ キャラクターを追加
               </button>
             </div>
           </SideSection>
 
-          {/* 作品情報リンク */}
           <Link href="/works/work-001"
             className="flex items-center justify-between px-3.5 py-3 text-[11px] text-text-2 hover:bg-white/3 transition-colors border-t border-border">
             <span>作品情報・章管理</span>
@@ -354,31 +418,39 @@ export default function EditorPage() {
 
       {/* ── 名前タグ挿入ポップオーバー ── */}
       {tagPopoverOpen && (
-        <div
-          className="fixed z-50 bg-bg-card2 border border-accent-lt/30 rounded-xl py-2 shadow-2xl animate-pop-in min-w-[200px]"
-          style={{ left: tagPopoverPos.x, top: tagPopoverPos.y }}
-        >
-          <p className="text-[9px] text-text-3 px-3 pb-2 uppercase tracking-widest">変換キャラクターを選ぶ</p>
-          {chars.map(c => (
-            <button key={c.id} onClick={() => insertNameTag(c)}
-              className="w-full flex items-center justify-between px-3 py-2 text-left hover:bg-accent/12 transition-colors">
-              <span className="text-[12px] text-text-1">{c.name}</span>
-              <span className="text-[10px] font-mono text-accent-lt bg-accent/18 border border-accent-lt/25 px-1.5 py-0.5 rounded">
-                {`{{${c.name}_${c.yomi}}}`}
-              </span>
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setTagPopoverOpen(false)} />
+          <div
+            className="fixed z-50 bg-bg-card2 border border-accent-lt/30 rounded-xl py-2 shadow-2xl animate-pop-in min-w-[200px]"
+            style={{ left: tagPopoverPos.x, top: tagPopoverPos.y }}
+          >
+            <p className="text-[9px] text-text-3 px-3 pb-2 uppercase tracking-widest">変換キャラクターを選ぶ</p>
+            {chars.map(c => (
+              <button key={c.id} onClick={() => insertNameTag(c)}
+                className="w-full flex items-center justify-between px-3 py-2 text-left hover:bg-accent/12 transition-colors">
+                <span className="text-[12px] text-text-1">{c.name}</span>
+                <span className="text-[10px] font-mono text-accent-lt bg-accent/18 border border-accent-lt/25 px-1.5 py-0.5 rounded">
+                  {`{{${c.name}_${c.yomi}}}`}
+                </span>
+              </button>
+            ))}
+            <div className="h-px bg-border mx-2 my-1" />
+            <button onClick={() => { setCharModalOpen(true); setTagPopoverOpen(false); }}
+              className="w-full flex items-center gap-2 px-3 py-2 text-[11px] text-accent hover:bg-accent/8 transition-colors">
+              <span>＋</span><span>キャラクターを追加</span>
             </button>
-          ))}
-          <div className="h-px bg-border mx-2 my-1" />
-          <button onClick={() => { setCharModalOpen(true); setTagPopoverOpen(false); }}
-            className="w-full flex items-center gap-2 px-3 py-2 text-[11px] text-accent hover:bg-accent/8 transition-colors">
-            <span>＋</span><span>キャラクターを追加</span>
-          </button>
-        </div>
+          </div>
+        </>
       )}
 
-      {/* ポップオーバー外クリックで閉じる */}
-      {tagPopoverOpen && (
-        <div className="fixed inset-0 z-40" onClick={() => setTagPopoverOpen(false)} />
+      {/* ── 画像スロット名ダイアログ ── */}
+      {slotDialogOpen && (
+        <SlotNameDialog
+          type={slotDialogType}
+          defaultName={slotDialogName}
+          onConfirm={insertMediaSlot}
+          onClose={() => setSlotDialogOpen(false)}
+        />
       )}
 
       {/* ── キャラクター追加・編集モーダル ── */}
@@ -451,6 +523,75 @@ function SideRow({ label, children }: { label: string; children: React.ReactNode
   );
 }
 
+/* ── 画像スロット名入力ダイアログ ── */
+function SlotNameDialog({ type, defaultName, onConfirm, onClose }: {
+  type: "image" | "video";
+  defaultName: string;
+  onConfirm: (name: string) => void;
+  onClose: () => void;
+}) {
+  const [name, setName] = useState(defaultName);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, []);
+
+  const label = type === "image" ? "画像" : "動画";
+  const examples = type === "image"
+    ? ["有村架純①", "風景①", "桜の木", "教室の朝"]
+    : ["OP動画", "挿入歌シーン"];
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center px-4"
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="w-full max-w-[380px] bg-bg-card2 border border-border-2 rounded-xl animate-pop-in">
+        <div className="flex items-center justify-between px-4 py-4 border-b border-border">
+          <p className="text-[13px] font-medium text-text-1">
+            {label}スロットを追加
+          </p>
+          <button onClick={onClose} className="w-6 h-6 rounded-full bg-white/5 border border-border flex items-center justify-center">
+            <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth="2"><path d="M3 3l10 10M13 3L3 13"/></svg>
+          </button>
+        </div>
+        <div className="px-4 py-4">
+          <p className="text-[10.5px] text-text-2 mb-1.5">スロット名 <span className="text-text-3">（読者には表示されません）</span></p>
+          <input
+            ref={inputRef}
+            value={name}
+            onChange={e => setName(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter") onConfirm(name); if (e.key === "Escape") onClose(); }}
+            placeholder="例：有村架純①"
+            className="input-dark w-full"
+          />
+          <div className="flex flex-wrap gap-1.5 mt-3">
+            {examples.map(ex => (
+              <button key={ex} onClick={() => setName(ex)}
+                className="text-[10px] px-2.5 py-1 rounded-lg bg-white/5 border border-border-2 text-text-2 hover:bg-accent/15 hover:text-accent-lt hover:border-accent-lt/30 transition-colors">
+                {ex}
+              </button>
+            ))}
+          </div>
+          <p className="text-[10px] text-text-3 mt-3 leading-relaxed">
+            スロットは「名前」で管理されます。後からメディアパックでファイルを割り当てられます。
+          </p>
+        </div>
+        <div className="flex gap-2 justify-end px-4 pb-4">
+          <button onClick={onClose}
+            className="text-[12px] px-4 py-2 rounded-xl border border-border-2 text-text-2 hover:text-text-1 transition-colors">
+            キャンセル
+          </button>
+          <button onClick={() => onConfirm(name.trim() || `${label}スロット`)}
+            className="text-[12px] px-4 py-2 rounded-xl bg-accent-2 text-white hover:bg-accent transition-colors">
+            挿入する
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ── キャラクターモーダル ── */
 function CharModal({ editing, onSave, onClose }: {
   editing: Char | null;
@@ -472,16 +613,13 @@ function CharModal({ editing, onSave, onClose }: {
         </div>
         <div className="px-4 py-4 flex flex-col gap-3">
           <FormField label="キャラクター名">
-            <input value={name} onChange={e => setName(e.target.value)} placeholder="例：主人公"
-              className="input-dark" />
+            <input value={name} onChange={e => setName(e.target.value)} placeholder="例：主人公" className="input-dark" />
           </FormField>
           <FormField label="よみがな">
-            <input value={yomi} onChange={e => setYomi(e.target.value)} placeholder="例：しゅじんこう"
-              className="input-dark" />
+            <input value={yomi} onChange={e => setYomi(e.target.value)} placeholder="例：しゅじんこう" className="input-dark" />
           </FormField>
           <FormField label="性別（語尾変化用）">
-            <select value={gender} onChange={e => setGender(e.target.value as typeof gender)}
-              className="select-dark">
+            <select value={gender} onChange={e => setGender(e.target.value as typeof gender)} className="select-dark">
               <option value="neutral">指定なし</option>
               <option value="female">女性</option>
               <option value="male">男性</option>
@@ -510,35 +648,93 @@ function FormField({ label, children }: { label: string; children: React.ReactNo
   );
 }
 
-/* ── プレビューオーバーレイ ── */
+/* ── プレビューオーバーレイ（ページ対応） ── */
 function PreviewOverlay({ title, bodyHtml, chars, onClose }: {
   title: string; bodyHtml: string; chars: Char[]; onClose: () => void;
 }) {
-  const previewHtml = bodyHtml.replace(
-    /data-char-id="([^"]+)"[^>]*>{{([^}]+)}}<\/span>/g,
+  const [pageIndex, setPageIndex] = useState(0);
+
+  // 名前タグを置換し、ページ切り替えブロックで分割
+  const processedHtml = bodyHtml.replace(
+    /data-char-id="([^"]+)"[^>]*>{{[^}]+}}<\/span>/g,
     (_m, charId) => {
       const c = chars.find(x => x.id === charId);
       return `style="color:#c5b3ff;">${c?.name ?? "主人公"}</span>`;
     }
   );
+
+  // ページ切り替えブロックで分割
+  const pages = processedHtml
+    .split(/<div class="page-break-block"[^>]*>[\s\S]*?<\/div>/g)
+    .map(p => p.trim())
+    .filter(Boolean);
+
+  if (pages.length === 0) pages.push(processedHtml);
+
+  const totalPages = pages.length;
+  const currentPage = pages[pageIndex] ?? "";
+
   return (
     <div className="fixed inset-0 z-50 bg-bg flex flex-col">
+      {/* ヘッダー */}
       <div className="flex items-center justify-between px-5 h-12 bg-bg-card border-b border-border flex-shrink-0">
-        <p className="text-[12px] text-text-2">📖 プレビュー — 読者から見える状態</p>
-        <button onClick={onClose}
-          className="text-[12px] px-3 py-1.5 rounded-lg bg-bg-card border border-border-2 text-text-2 hover:text-text-1 transition-colors">
-          × 閉じる
-        </button>
-      </div>
-      <div className="flex-1 overflow-y-auto">
-        <div className="max-w-[680px] mx-auto px-6 py-8">
-          <h1 className="font-serif text-[24px] font-normal text-text-1 mb-7 pb-5 border-b border-border"
-            style={{ fontFamily: "var(--font-serif)" }}>{title}</h1>
-          <div className="text-[16px] leading-[2.1] text-text-1"
-            style={{ fontFamily: "'Noto Serif JP', serif" }}
-            dangerouslySetInnerHTML={{ __html: previewHtml }} />
+        <div className="flex items-center gap-3">
+          <p className="text-[12px] text-text-2">👁 プレビュー</p>
+          {totalPages > 1 && (
+            <span className="text-[11px] text-accent-lt bg-accent/15 px-2.5 py-0.5 rounded-full border border-accent-lt/25">
+              {pageIndex + 1} / {totalPages} ページ
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          {totalPages > 1 && (
+            <>
+              <button
+                onClick={() => setPageIndex(i => Math.max(0, i - 1))}
+                disabled={pageIndex === 0}
+                className="text-[11px] px-3 py-1.5 rounded-lg bg-bg-card border border-border-2 text-text-2 hover:text-text-1 transition-colors disabled:opacity-30">
+                ‹ 前ページ
+              </button>
+              <button
+                onClick={() => setPageIndex(i => Math.min(totalPages - 1, i + 1))}
+                disabled={pageIndex === totalPages - 1}
+                className="text-[11px] px-3 py-1.5 rounded-lg bg-bg-card border border-border-2 text-text-2 hover:text-text-1 transition-colors disabled:opacity-30">
+                次ページ ›
+              </button>
+            </>
+          )}
+          <button onClick={onClose}
+            className="text-[12px] px-3 py-1.5 rounded-lg bg-bg-card border border-border-2 text-text-2 hover:text-text-1 transition-colors">
+            × 閉じる
+          </button>
         </div>
       </div>
+
+      {/* 本文 */}
+      <div className="flex-1 overflow-y-auto">
+        <div className="max-w-[680px] mx-auto px-6 py-8">
+          {pageIndex === 0 && (
+            <h1 className="font-serif text-[24px] font-normal text-text-1 mb-7 pb-5 border-b border-border"
+              style={{ fontFamily: "var(--font-serif)" }}>{title}</h1>
+          )}
+          <div className="text-[16px] leading-[2.1] text-text-1"
+            style={{ fontFamily: "'Noto Serif JP', serif" }}
+            dangerouslySetInnerHTML={{ __html: currentPage }} />
+        </div>
+      </div>
+
+      {/* ページネーション（フッター） */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-center gap-2 py-4 border-t border-border bg-bg-card flex-shrink-0">
+          {Array.from({ length: totalPages }).map((_, i) => (
+            <button key={i} onClick={() => setPageIndex(i)}
+              className={cn(
+                "w-2 h-2 rounded-full transition-all",
+                i === pageIndex ? "bg-accent scale-125" : "bg-white/20 hover:bg-white/40"
+              )} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
