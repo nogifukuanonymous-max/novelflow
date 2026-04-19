@@ -338,7 +338,7 @@ export async function buildNvpFile(options: BuildNvpOptions): Promise<Buffer> {
   if (thumbBuf) zip.file("thumbnail.jpg", thumbBuf);
 
   /* メディアファイルを追加 */
-  for (const [path, buf] of options.mediaBuffers.entries()) {
+  for (const [path, buf] of Array.from(options.mediaBuffers.entries())) {
     if (path === "thumbnail.jpg") continue;
     zip.file(path, buf);
   }
@@ -408,13 +408,13 @@ export async function buildNvfFile(options: BuildNvfOptions): Promise<Buffer> {
   zip.file("manifest.json", JSON.stringify(manifest, null, 2));
 
   /* エピソードテキスト */
-  for (const [path, text] of options.episodeTexts.entries()) {
+  for (const [path, text] of Array.from(options.episodeTexts.entries())) {
     zip.file(path, text);
   }
 
   /* アセット */
   if (options.assetBuffers) {
-    for (const [path, buf] of options.assetBuffers.entries()) {
+    for (const [path, buf] of Array.from(options.assetBuffers.entries())) {
       zip.file(path, buf);
     }
   }

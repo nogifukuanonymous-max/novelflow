@@ -175,7 +175,7 @@ export async function exportPackHandler(req: NextRequest, packId: string, userId
 
   await sb.from("media_packs").update({ file_url: storagePath }).eq("id", packId);
 
-  return new Response(zipBuf, {
+  return new Response(zipBuf as unknown as BodyInit, {
     headers: {
       "Content-Type":        "application/zip",
       "Content-Disposition": `attachment; filename="${pack.id}.nvp"`,
@@ -249,10 +249,9 @@ export async function importPackHandler(req: NextRequest, userId: string) {
   const { error } = await sb
     .from("user_pack_imports")
     .upsert({
-      user_id:     userId,
-      pack_id:     manifest.packId,
-      is_active:   false,
-      imported_at: new Date().toISOString(),
+      user_id:   userId,
+      pack_id:   manifest.packId,
+      is_active: false,
     }, { onConflict: "user_id,pack_id" });
 
   if (error) return Errors.internal(error.message);

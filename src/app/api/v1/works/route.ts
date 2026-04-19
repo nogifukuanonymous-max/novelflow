@@ -8,6 +8,7 @@
 import { type NextRequest } from "next/server";
 import { cookies } from "next/headers";
 import { createServerClient } from "@/lib/supabase/server";
+import type { Json } from "@/lib/supabase/database.types";
 import {
   withAuth, ok, Errors, parseJsonBody, requireFields,
   validateLength, parsePagination,
@@ -166,7 +167,7 @@ export const createEpisode = withAuth(async (req, ctx) => {
       work_id:      workId!,
       chapter_id:   body.chapter_id ?? null,
       title:        body.title,
-      body_json:    body.body_json,
+      body_json:    body.body_json as unknown as Json,
       char_count:   body.char_count ?? 0,
       sort_order:   body.sort_order ?? 0,
       is_published: body.is_published ?? false,

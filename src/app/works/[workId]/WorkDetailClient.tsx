@@ -213,13 +213,13 @@ export function WorkDetailClient({ work, chapters, packs }: Props) {
                         active={selectedMode === "flip"}
                         onClick={() => setSelectedMode("flip")}
                         icon="📖" label="ページめくり"
-                        disabled={work.readingMode === "scroll_only"}
+                        disabled={false}
                       />
                       <ModeButton
                         active={selectedMode === "scroll"}
                         onClick={() => setSelectedMode("scroll")}
                         icon="📜" label="縦スクロール"
-                        disabled={work.readingMode === "flip_only"}
+                        disabled={false}
                       />
                     </div>
                   </div>
