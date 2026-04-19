@@ -182,13 +182,19 @@ export function ReaderClient({ work, episode, chapters, prevEpisode, nextEpisode
           className="absolute inset-0 flex flex-col"
           onTouchStart={handleTouchStart}
           onTouchEnd={handleTouchEnd}
-          onClick={e => {
-            const x = e.clientX / window.innerWidth;
-            if (x < 0.25) prevPage();
-            else if (x > 0.75) nextPage();
-            else showHeader();
-          }}
+          onClick={showHeader}
         >
+          {/* 透明タップゾーン: 左半分→前ページ、右半分→次ページ */}
+          <div className="absolute inset-0 z-10 flex pointer-events-none" style={{ top: "50px" }}>
+            <div
+              className="flex-1 h-full cursor-pointer pointer-events-auto"
+              onClick={e => { e.stopPropagation(); prevPage(); }}
+            />
+            <div
+              className="flex-1 h-full cursor-pointer pointer-events-auto"
+              onClick={e => { e.stopPropagation(); nextPage(); }}
+            />
+          </div>
           {/* メディアエリア 55% */}
           <div className="w-full flex-shrink-0 relative overflow-hidden" style={{ height: "55%" }}>
             <div className="absolute inset-0 transition-all duration-700" style={{ background: page.bg }} />
@@ -198,11 +204,6 @@ export function ReaderClient({ work, episode, chapters, prevEpisode, nextEpisode
                 WebkitMaskImage: "radial-gradient(ellipse 100% 80% at 50% 50%, black, transparent)" }} />
             <div className="absolute bottom-0 left-0 right-0 h-1/2"
               style={{ background: `linear-gradient(to bottom, transparent, ${themeBg})` }} />
-            {page.label && (
-              <span className="absolute bottom-3 left-3 text-[9.5px] text-white/40 bg-black/40 rounded-md px-2 py-0.5 backdrop-blur-sm">
-                {page.label}
-              </span>
-            )}
           </div>
 
           {/* テキストエリア */}
@@ -235,27 +236,6 @@ export function ReaderClient({ work, episode, chapters, prevEpisode, nextEpisode
             </div>
           </div>
 
-          {/* 矢印ボタン */}
-          {[
-            { side: "left", disabled: currentPage === 0, action: prevPage, icon: "‹" },
-            { side: "right", disabled: currentPage === PAGES.length - 1, action: nextPage, icon: "›" },
-          ].map(({ side, disabled, action, icon }) => (
-            <button
-              key={side}
-              onClick={e => { e.stopPropagation(); action(); }}
-              disabled={disabled}
-              className={cn(
-                "absolute top-[72%] -translate-y-1/2 w-9 h-9 rounded-full",
-                "bg-black/45 border border-white/12 flex items-center justify-center",
-                "backdrop-blur-sm text-white/70 text-xl transition-all",
-                "hover:bg-accent/40 hover:border-accent-lt/30",
-                "disabled:opacity-25 disabled:cursor-not-allowed",
-                side === "left" ? "left-2" : "right-2"
-              )}
-            >
-              {icon}
-            </button>
-          ))}
         </div>
       )}
 
@@ -302,12 +282,7 @@ export function ReaderClient({ work, episode, chapters, prevEpisode, nextEpisode
                       <div className="h-[200px] flex items-center justify-center text-4xl" style={{ background: p.bg }}>
                         🌸
                       </div>
-                      {p.label && (
-                        <p className="text-[10.5px] text-center py-2 px-3" style={{ color: `${themeTxt}55` }}>
-                          {p.label}
-                        </p>
-                      )}
-                    </div>
+                      </div>
                   )}
                   <div
                     className="mb-5"

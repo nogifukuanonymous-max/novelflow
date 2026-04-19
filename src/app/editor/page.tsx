@@ -1,6 +1,6 @@
 "use client";
 import { useState, useRef, useEffect, useCallback, Suspense } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { Toggle, RadioCard } from "@/components/ui";
@@ -43,6 +43,7 @@ export default function EditorPage() {
 }
 
 function EditorInner() {
+  const router = useRouter();
   const [title, setTitle]         = useState("交差する夜明け");
   const [charCount, setCharCount] = useState(0);
   const [saveState, setSaveState] = useState<"saved" | "saving" | "unsaved">("saved");
@@ -276,7 +277,14 @@ function EditorInner() {
           className="text-[11px] px-3 py-1.5 rounded-2xl border border-border-2 text-text-2 hover:border-accent hover:text-accent-lt transition-all flex-shrink-0">
           下書き保存
         </button>
-        <button onClick={() => alert("公開しました！")}
+        <button
+          onClick={() => {
+            if (editorRef.current) {
+              localStorage.setItem("nf_editor_title", title);
+              localStorage.setItem("nf_editor_body", editorRef.current.innerHTML);
+            }
+            router.push("/editor/confirm");
+          }}
           className="text-[11px] px-4 py-1.5 rounded-2xl bg-accent-2 text-white hover:bg-accent transition-colors flex-shrink-0"
           style={{ boxShadow: "0 2px 10px rgba(83,74,183,0.3)" }}>
           公開する ›
