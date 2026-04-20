@@ -49,28 +49,31 @@ function AuthPage({ initialMode }: { initialMode: Mode }) {
     try {
       if (mode === "login") {
         const { error } = await sb.auth.signInWithPassword({ email, password });
-        if (error) throw error;
+        if (error) {
+          console.error("[login] signInWithPassword error:", JSON.stringify(error, null, 2));
+          throw error;
+        }
         router.push(redirectTo);
         router.refresh();
       } else {
-        const { error } = await sb.auth.signUp({
+        const result = await sb.auth.signUp({
           email, password,
           options: {
             data: { display_name: displayName },
           },
         });
-        if (error) throw error;
+        console.log("[register] signUp result:", JSON.stringify(result, null, 2));
+        if (result.error) throw result.error;
         setMessage("確認メールを送信しました。メールのリンクをクリックして登録を完了してください。");
       }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "エラーが発生しました";
-      setError(
-        msg.includes("環境変数が設定されていません") ? "サーバー設定エラー：管理者にお問い合わせください（環境変数未設定）" :
-        msg.includes("Invalid API key")            ? "サーバー設定エラー：Supabase APIキーが無効です。Vercel の環境変数を確認してください" :
-        msg.includes("Invalid login credentials")  ? "メールアドレスまたはパスワードが正しくありません" :
-        msg.includes("Email already registered")   ? "このメールアドレスは既に登録されています" :
-        msg
-      );
+      // デバッグ用: エラー全体をコンソールに出力
+      console.error("[auth] caught error:", err);
+      console.error("[auth] error JSON:", JSON.stringify(err, Object.getOwnPropertyNames(err as object)));
+
+      // デバッグ用: 生のエラーメッセージをそのまま表示
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(`[DEBUG] ${msg}`);
     } finally {
       setLoading(false);
     }
