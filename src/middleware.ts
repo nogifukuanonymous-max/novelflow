@@ -22,9 +22,17 @@ const AUTH_ROUTES = [
 export async function middleware(request: NextRequest) {
   const response = NextResponse.next({ request: { headers: request.headers } });
 
+  /* 環境変数が未設定の場合はミドルウェアをスキップ（診断しやすくするため） */
+  const supabaseUrl  = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseAnon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!supabaseUrl || !supabaseAnon) {
+    console.error("[middleware] NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY が未設定です");
+    return response;
+  }
+
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    supabaseUrl,
+    supabaseAnon,
     {
       cookies: {
         getAll() { return request.cookies.getAll(); },

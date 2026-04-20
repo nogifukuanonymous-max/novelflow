@@ -65,8 +65,10 @@ function AuthPage({ initialMode }: { initialMode: Mode }) {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "エラーが発生しました";
       setError(
-        msg.includes("Invalid login credentials") ? "メールアドレスまたはパスワードが正しくありません" :
-        msg.includes("Email already registered") ? "このメールアドレスは既に登録されています" :
+        msg.includes("環境変数が設定されていません") ? "サーバー設定エラー：管理者にお問い合わせください（環境変数未設定）" :
+        msg.includes("Invalid API key")            ? "サーバー設定エラー：Supabase APIキーが無効です。Vercel の環境変数を確認してください" :
+        msg.includes("Invalid login credentials")  ? "メールアドレスまたはパスワードが正しくありません" :
+        msg.includes("Email already registered")   ? "このメールアドレスは既に登録されています" :
         msg
       );
     } finally {

@@ -1,12 +1,22 @@
 import { createBrowserClient } from "@supabase/ssr";
 import type { Database } from "./database.types";
 
-const SUPABASE_URL  = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const SUPABASE_ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-
 /**
- * ブラウザ（Client Component）用クライアント
+ * ブラウザ（Client Component）用クライアント。
+ * 関数内で env を読むことで、Next.js が NEXT_PUBLIC_* を
+ * ビルド時に正しくインライン展開できるようにする。
  */
 export function createClient() {
-  return createBrowserClient<Database>(SUPABASE_URL, SUPABASE_ANON);
+  const url  = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!url || !anon) {
+    throw new Error(
+      "[NovelFlow] Supabase 環境変数が設定されていません。\n" +
+      "Vercel ダッシュボード → Settings → Environment Variables に\n" +
+      "NEXT_PUBLIC_SUPABASE_URL と NEXT_PUBLIC_SUPABASE_ANON_KEY を追加してください。"
+    );
+  }
+
+  return createBrowserClient<Database>(url, anon);
 }
