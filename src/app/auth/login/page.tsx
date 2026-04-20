@@ -45,7 +45,30 @@ function AuthPage({ initialMode }: { initialMode: Mode }) {
     setMessage(null);
     setLoading(true);
 
-    const sb = createClient();
+    /* ── 環境変数チェック（ビルド時埋め込み確認） ── */
+    const envUrl  = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const envAnon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!envUrl || !envAnon) {
+      setError(
+        `[ENV ERROR] 環境変数が未設定です。\n` +
+        `NEXT_PUBLIC_SUPABASE_URL: ${envUrl ?? "undefined"}\n` +
+        `NEXT_PUBLIC_SUPABASE_ANON_KEY: ${envAnon ? envAnon.slice(0, 30) + "…" : "undefined"}`
+      );
+      setLoading(false);
+      return;
+    }
+    console.log("[auth] env check OK — URL:", envUrl, "/ ANON prefix:", envAnon.slice(0, 20));
+
+    let sb: ReturnType<typeof createClient>;
+    try {
+      sb = createClient();
+    } catch (initErr: unknown) {
+      const msg = initErr instanceof Error ? initErr.message : String(initErr);
+      setError(`[CLIENT INIT ERROR] ${msg}`);
+      setLoading(false);
+      return;
+    }
+
     try {
       if (mode === "login") {
         const { error } = await sb.auth.signInWithPassword({ email, password });
@@ -58,22 +81,29 @@ function AuthPage({ initialMode }: { initialMode: Mode }) {
       } else {
         const result = await sb.auth.signUp({
           email, password,
-          options: {
-            data: { display_name: displayName },
-          },
+          options: { data: { display_name: displayName } },
         });
         console.log("[register] signUp result:", JSON.stringify(result, null, 2));
         if (result.error) throw result.error;
         setMessage("確認メールを送信しました。メールのリンクをクリックして登録を完了してください。");
       }
     } catch (err: unknown) {
-      // デバッグ用: エラー全体をコンソールに出力
       console.error("[auth] caught error:", err);
-      console.error("[auth] error JSON:", JSON.stringify(err, Object.getOwnPropertyNames(err as object)));
 
-      // デバッグ用: 生のエラーメッセージをそのまま表示
-      const msg = err instanceof Error ? err.message : String(err);
-      setError(`[DEBUG] ${msg}`);
+      /* エラーの全プロパティを画面に表示 */
+      let detail = "";
+      if (err && typeof err === "object") {
+        const e = err as Record<string, unknown>;
+        detail = [
+          `message: ${String(e.message ?? "")}`,
+          `status: ${String(e.status ?? e.__isAuthError ?? "")}`,
+          `code: ${String(e.code ?? "")}`,
+          `name: ${String(e.name ?? "")}`,
+        ].join("\n");
+      } else {
+        detail = String(err);
+      }
+      setError(`[SUPABASE ERROR]\n${detail}`);
     } finally {
       setLoading(false);
     }
@@ -121,7 +151,7 @@ function AuthPage({ initialMode }: { initialMode: Mode }) {
         </div>
 
         {/* エラー・メッセージ */}
-        {error   && <div className="mb-4 px-3 py-2.5 rounded-lg bg-coral/12 border border-coral/25 text-[#f0997b] text-xs">{error}</div>}
+        {error   && <div className="mb-4 px-3 py-2.5 rounded-lg bg-coral/12 border border-coral/25 text-[#f0997b] text-xs whitespace-pre-wrap break-all font-mono">{error}</div>}
         {message && <div className="mb-4 px-3 py-2.5 rounded-lg bg-teal/12 border border-teal/25 text-[#5dcaa5] text-xs">{message}</div>}
 
         {/* フォーム */}
